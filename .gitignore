@@ -1,0 +1,11 @@
+dist/
+*.exe
+*.log
+.phrases-bak/
+.deploy.env
+.worker.env
+settings.ini
+servers.txt
+custom.txt
+data-custom.txt
+__pycache__/

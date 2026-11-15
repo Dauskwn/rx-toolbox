@@ -1,0 +1,74 @@
+{
+  "杂项": [
+    {
+      "title": "开局公告",
+      "text": "!say 按服务器规则填写"
+    }
+  ],
+  "指令表": [
+    {
+      "title": "▓ 常用命令",
+      "text": ""
+    },
+    {
+      "title": "给武器",
+      "text": "!giveweapon ^ weapon_physgun",
+      "ulx": "ulx giveweapon ^ weapon_physgun",
+      "note": "把 ^ 换成用户名，或在上方「目标 ID」里填"
+    },
+    {
+      "title": "切第三人称",
+      "text": "!3P"
+    },
+    {
+      "title": "关闭背景音乐",
+      "text": "stopsound",
+      "note": "这条不含 ^，不会被替换"
+    }
+  ],
+  "技能表": [
+    {
+      "title": "▓ 阵营技能",
+      "text": ""
+    },
+    {
+      "title": "示例技能",
+      "text": "!giveability ^ skill_demo",
+      "note": "按技能表格式填你自己的"
+    }
+  ],
+  "物品表": [
+    {
+      "title": "▓ 枪械",
+      "text": ""
+    },
+    {
+      "title": "示例步枪",
+      "text": "!giveweapon ^ weapon_rifle_demo",
+      "note": "同一把枪有多种代码就写多条"
+    }
+  ],
+  "角色表": [
+    {
+      "title": "▓ 默认阵营",
+      "text": ""
+    },
+    {
+      "title": "示例角色",
+      "text": "!forcespawn ^ job_demo",
+      "alt": "!devforcespawn ^ job_demo"
+    }
+  ],
+  "SCP角色": [
+    {
+      "title": "示例 SCP",
+      "text": "!forcescp ^ scp999"
+    }
+  ],
+  "模型表": [
+    {
+      "title": "示例模型",
+      "text": "!setmodel ^ models/demo.mdl"
+    }
+  ]
+}
