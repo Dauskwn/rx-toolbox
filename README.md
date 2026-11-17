@@ -7,13 +7,14 @@ GMod 服务器「RXSEND / Breach」类玩法用的**指令速查与操作辅助�
 
 ## 功能
 
-- **指令速查**：单击条目直接复制指令；主指令 / 备用写法 / `ulx` 控制台写法三档切换
+- **指令速查与分类折叠**：单击条目直接复制指令；主指令 / 备用写法 / `ulx` 控制台写法三档切换；点击任意含子条目的分类标题即可平滑展开/收起（自动兼容独立提示横幅）
 - **目标替换**：命令里的 `^` 自动替换成目标玩家名（名字带空格会自动加引号）
-- **搜索与分类**：空格分词筛选、Esc 清空、按 ▓ 大类跳转
-- **条目编辑**：内置编辑器，改动写进同目录 `data-custom.txt`，即时生效
-- **自动挤服**：A2S 查询服务器状态 + OCR 识别「服务器已满」，热键连点
-- **外置准星**：置顶透明窗口，6 种矢量样式或自定义图片
-- **热键总开关**：Ctrl+F10 一键把 F5~F8 还给系统（它们可能被别的程序用着）
+- **搜索与分类目录**：空格分词筛选、Esc 清空、右上角「分类 ▾」自动展开并跳转
+- **条目编辑与按页锁定**：内置编辑器仅锁定你真正修改过的页签至 `data-custom.txt`，未改页签继续随官方底表更新
+- **数据策略与 `.rxbak` 本地备份**：支持更新前弹窗询问/自动替换/暂存为 `phrases.new.json`，并提供多表差异明细与手动/自动 `.rxbak` 完整快照与选择性还原
+- **自动挤服与屏幕倒计时**：A2S 查询服务器状态 + Windows OCR 识别进服；点击穿透倒计时悬浮窗（支持多方案与时间链变色/闪烁/描边标注）
+- **外置准星与三档主题**：置顶透明窗口（6 种矢量样式或自定义图片）；护眼浅色 / 跟随系统 / 夜间深色三档主题；8 项可自定义全局热键 + `Ctrl+F10` 一键归还热键
+- **纯 C# 原地更新**：同目录 `.upd` 下载与 64 位 SHA256 校验、`.old` 原地改名替换与异常回滚，主程序固定命名为 `Rx工具箱.exe`（后续升级不破坏快捷方式）
 - **在线版本库 / 自动更新**：可选，指向你自己的服务端即可
 
 ## 构建
@@ -59,12 +60,12 @@ powershell -File build\build.ps1
 
 ```powershell
 set RX_SELFTEST=1
-dist\RX工具箱 V1.7.exe        :: 不建窗口跑断言，结果写 selftest.log，失败退出码 1
+dist\Rx工具箱.exe        :: 不建窗口跑断言（76 项），结果写 selftest.log，失败退出码 1
 
 set RX_DUMP_UI=1
-dist\RX工具箱 V1.7.exe        :: 把每个页签的控件坐标写成 dump-ui.log
+dist\Rx工具箱.exe        :: 把每个页签的控件坐标写成 dump-ui.log
 
-dist\RX工具箱 V1.7.exe --dev  :: 多实例 + 标题带 DEV，方便与正式版同时开
+dist\Rx工具箱.exe --dev  :: 多实例 + 标题带 DEV，方便与正式版同时开
 ```
 
 ## 隐私
@@ -84,8 +85,8 @@ dist\RX工具箱 V1.7.exe --dev  :: 多实例 + 标题带 DEV，方便与正式�
   specifically requested by the user or the person installing or operating it. The only network
   operations are an optional update check and an optional, user-configured data synchronisation
   endpoint, both triggered explicitly by the user.
-- Build: `.github/workflows/build.yml` compiles `rx-core.cs` + `build/program.cs` with the `csc.exe`
-  bundled with .NET Framework 4.8, then submits the artifact for signing.
+- Build: `.github/workflows/build.yml` compiles `src/*.cs` + `build/program.cs` with the `csc.exe`
+  bundled with .NET Framework 4.8, runs `RX_SELFTEST=1` verification, then submits the artifact for signing.
 - Status: signing application in progress.
 
 ## 许可

@@ -1,6 +1,12 @@
 dist/
 *.exe
+*.zip
 *.log
+*.rxbak
+backups/
+*.upd
+*.old
+*.old.*
 .phrases-bak/
 .deploy.env
 .worker.env
@@ -8,4 +14,7 @@ settings.ini
 servers.txt
 custom.txt
 data-custom.txt
+phrases.new.json
+selftest.log
+dump-ui.log
 __pycache__/

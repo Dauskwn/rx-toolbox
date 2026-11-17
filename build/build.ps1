@@ -1,4 +1,6 @@
-param([string]$OutName = "")   # 可选：指定产物文件名（默认 RX工具箱 V<版本>.exe）
+﻿param(
+    [string]$OutName = ""    # 可选：指定产物文件名（默认 Rx工具箱.exe）
+)
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
@@ -18,7 +20,8 @@ foreach ($c in @(
 }
 if (-not $csc) { throw "未找到 csc.exe" }
 
-$core = Join-Path $root "rx-core.cs"
+$srcFiles = Get-ChildItem (Join-Path $root "src") -Filter *.cs | Sort-Object Name | ForEach-Object { $_.FullName }
+if (-not $srcFiles -or $srcFiles.Count -eq 0) { throw "未找到 src\*.cs 源码文件" }
 $prog = Join-Path $root "build\program.cs"
 $icon = Join-Path $root "rx.ico"
 
@@ -56,9 +59,9 @@ if (Test-Path $winmd) {
 if ($OutName -and $OutName.Trim().Length -gt 0) {
     $out = Join-Path $dist $OutName
 } else {
-    $out = Join-Path $dist ("RX工具箱 V" + $verShort + ".exe")
+    $out = Join-Path $dist "Rx工具箱.exe"
 }
-& $csc ($args0 + @("/define:ADMIN_EDITION", "/out:$out", $prog, $core))
+& $csc ($args0 + @("/define:ADMIN_EDITION", "/out:$out", $prog) + $srcFiles)
 if ($LASTEXITCODE -ne 0) { throw "编译失败 (exit $LASTEXITCODE)" }
 
 Write-Output ""
