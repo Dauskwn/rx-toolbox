@@ -39,6 +39,8 @@ public partial class MainForm : Form
     int themeMode = 2;   // 0 = 跟随系统，1 = 夜间深色，2 = 护眼浅色（默认）
     Panel bottomBar;
     Label lblThemeSwitch;
+    Button bToolJoin, bToolCross, bToolTimer;
+    int toolSubIdx = 0;
     Panel pTimerPanel, pTimerDiv1, pTimerDiv2;
     CountdownOverlay timerOverlay;
     bool timerRunning = false, timerPaused = false;
@@ -91,16 +93,25 @@ public partial class MainForm : Form
     int[] favMax = new int[0];
     string favPath = "";
     // ===== 关于 / 自动更新 =====
-    public const string UPDATE_URL_DEFAULT = "https://rx-tools.pages.dev/version.json";
+    public const string UPDATE_URL_DEFAULT = "https://rx-toolbox.pages.dev/version.json";
     public const string APP_VERSION_NUM = "1.8.0";
     public const string APP_BUILD_DATE = "2026-11-17";
     string updateUrl = UPDATE_URL_DEFAULT;
-    TabPage aboutPage, spacerPage, customPage;
+    TabPage aboutPage, spacerPage, devPage, customPage;
     string dataRootDir = "";
-    TabPage joinPage, crossPage, timerPage;
-    Label lblPlayerBarTip;
-    Panel changelogHost;
+    int dataUpdateMode = 0;   // 0 = 询问是否替换，1 = 自动替换未修改页，2 = 仅下载保存为 phrases.new.json
+    ComboBox cmbDataUpdateMode;
+    Label lblPendingDataState;
+    TextBox txtDevStatus;
+    ListView lvVersions;
+    TextBox txtHubUrl, txtHubKey;
+    bool devToolsOn = false;
+    bool devToolsLoading = false;
+    CheckBox chkDevTools;
+    string hubUrl = "https://rx-toolbox.pages.dev/api";
+    string hubKey = "";
     Label lblUpdState;
+    Panel changelogHost;
     string updLatestNotes = "";
     Button btnUpdCheck, btnUpdOpen;
     CheckBox chkAutoUpdate;
@@ -108,116 +119,9 @@ public partial class MainForm : Form
     volatile bool updBusy;
     string updLatestUrl = "", updLatestFallback = "", updLatestVersion = "";
     string updLatestSha = "";
+    string updLatestDataUrl = "", updLatestDataSha = "";   // 数据文件（phrases.json）随 exe 一起更新
     bool startupCheckDone;
     bool autoUpdateOn = true;
-
-    static string Esc0(string s)
-    {
-        if (s == null) return "null";
-        return s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
-    }
-
-    static string JsonEsc(string s)
-    {
-        if (s == null) return "";
-        var sb = new StringBuilder(s.Length + 16);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c == '"') sb.Append("\\\"");
-            else if (c == '\\') sb.Append("\\\\");
-            else if (c == '\n') sb.Append("\\n");
-            else if (c == '\r') sb.Append("\\r");
-            else if (c == '\t') sb.Append("\\t");
-            else if (c < ' ') sb.Append(' ');
-            else sb.Append(c);
-        }
-        return sb.ToString();
-    }
-
-    static string JsonUnesc(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        var sb = new StringBuilder(s.Length);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c == '\\' && i + 1 < s.Length)
-            {
-                char n = s[i + 1];
-                if (n == 'n') { sb.Append('\n'); i++; continue; }
-                if (n == 'r') { sb.Append('\r'); i++; continue; }
-                if (n == 't') { sb.Append('\t'); i++; continue; }
-                if (n == '"') { sb.Append('"'); i++; continue; }
-                if (n == '\\') { sb.Append('\\'); i++; continue; }
-                if (n == 'u' && i + 5 < s.Length)
-                {
-                    int code;
-                    if (int.TryParse(s.Substring(i + 2, 4), System.Globalization.NumberStyles.HexNumber,
-                        System.Globalization.CultureInfo.InvariantCulture, out code))
-                    {
-                        sb.Append((char)code);
-                        i += 5;
-                        continue;
-                    }
-                }
-            }
-            sb.Append(c);
-        }
-        return sb.ToString();
-    }
-
-    string PromptText(string title, string label, string def)
-    {
-        return PromptText(title, label, def, false);
-    }
-
-    string PromptText(string title, string label, string def, bool multiline)
-    {
-        using (var f = new Form())
-        {
-            f.Text = title;
-            f.FormBorderStyle = FormBorderStyle.FixedDialog;
-            f.StartPosition = FormStartPosition.CenterParent;
-            f.MaximizeBox = false;
-            f.MinimizeBox = false;
-            f.ClientSize = multiline ? new Size(480, 220) : new Size(400, 130);
-            var lb = new Label();
-            lb.Text = label;
-            lb.SetBounds(12, 12, f.ClientSize.Width - 24, 22);
-            f.Controls.Add(lb);
-            var tb = new TextBox();
-            tb.Text = def ?? "";
-            if (multiline)
-            {
-                tb.Multiline = true;
-                tb.AcceptsReturn = true;
-                tb.WordWrap = true;
-                tb.ScrollBars = ScrollBars.Vertical;
-                tb.SetBounds(12, 38, f.ClientSize.Width - 24, 122);
-            }
-            else
-            {
-                tb.SetBounds(12, 38, f.ClientSize.Width - 24, 24);
-            }
-            f.Controls.Add(tb);
-            int btnY = multiline ? 174 : 80;
-            var ok = new Button();
-            ok.Text = "确定";
-            ok.DialogResult = DialogResult.OK;
-            ok.SetBounds(f.ClientSize.Width - 188, btnY, 80, 30);
-            f.Controls.Add(ok);
-            var cancel = new Button();
-            cancel.Text = "取消";
-            cancel.DialogResult = DialogResult.Cancel;
-            cancel.SetBounds(f.ClientSize.Width - 100, btnY, 80, 30);
-            f.Controls.Add(cancel);
-            if (!multiline) f.AcceptButton = ok;
-            f.CancelButton = cancel;
-            ThemeDialog(f);
-            return f.ShowDialog(this) == DialogResult.OK ? tb.Text.Trim() : null;
-        }
-    }
 
     string settingsPath = "";
     string[] favList = new string[0];
@@ -381,6 +285,7 @@ public partial class MainForm : Form
             hkMod[i] = HKDefMod[i];
         }
         dataRootDir = dataDir;
+        dataOverridePath = Path.Combine(dataDir, "data-custom.txt");
         customPath = Path.Combine(dataDir, "custom.txt");
         favPath = Path.Combine(dataDir, "servers.txt");
         settingsPath = Path.Combine(dataDir, "settings.ini");
@@ -443,12 +348,36 @@ public partial class MainForm : Form
         Controls.Add(tabs);
         Controls.Add(bottomBar);
 
-        BuildPlayerToolPages();
+        if (tabTitles != null)
+        {
+            dataTabLabels = new string[tabTitles.Length];
+            dataTabLists = new List<string>[tabTitles.Length];
+            dataTabBase = new string[tabTitles.Length][];
+            var overrides = LoadDataOverrides();
+
+            for (int i = 0; i < tabTitles.Length; i++)
+            {
+                string[] items = (tabItems != null && i < tabItems.Length) ? tabItems[i] : null;
+                dataTabBase[i] = items ?? new string[0];
+                var list = new List<string>();
+                if (items != null) list.AddRange(items);
+
+                List<string> ov;
+                if (overrides.TryGetValue(tabTitles[i], out ov)) list = ov;
+
+                dataTabLabels[i] = tabTitles[i];
+                dataTabLists[i] = list;
+                tabs.TabPages.Add(BuildTextPage(tabTitles[i], list.ToArray(), i));
+            }
+        }
         customPage = BuildCustomPage();
         tabs.TabPages.Add(customPage);
+        tabs.TabPages.Add(BuildToolPage());
+        devPage = BuildDevPage();
         aboutPage = BuildAboutPage();
         spacerPage = new TabPage("");
-        tabs.TabPages.Add(spacerPage);          // 只占宽度，把「关于」推到最右侧
+        tabs.TabPages.Add(spacerPage);          // 只占宽度，把右边两个顶到最右
+        if (devToolsOn) tabs.TabPages.Add(devPage);   // 开发者工具默认隐藏，在「关于」里开
         tabs.TabPages.Add(aboutPage);
         tabs.Selecting += delegate(object s2, TabControlCancelEventArgs e2)
         {
@@ -458,7 +387,6 @@ public partial class MainForm : Form
         // TabPage 在首次显示前拿到的尺寸不准，切到工具页时重排一次
         tabs.SelectedIndexChanged += delegate
         {
-            UpdatePlayerToolBar();
             LayoutToolBar();
             if (pJoinPanel != null && pJoinPanel.Visible)
             {
@@ -471,6 +399,14 @@ public partial class MainForm : Form
         };
 
         LoadSettings();
+        // 开发者工具默认隐藏；设置里开着才显示
+        if (chkDevTools != null)
+        {
+            devToolsLoading = true;
+            chkDevTools.Checked = devToolsOn;
+            devToolsLoading = false;
+        }
+        ApplyDevToolsTab(devToolsOn);
         ApplyTheme();
         // 设置里带着勾选偏好，读完重建列表（否则界面还是构造时默认的全选）
         FillSrvList();
@@ -545,6 +481,34 @@ public partial class MainForm : Form
         }
     }
 
+    // ===== 数据表本机覆盖（无损多行与行首 ### 转义保护）=====
+    Dictionary<string, List<string>> LoadDataOverrides()
+    {
+        var map = new Dictionary<string, List<string>>();
+        try
+        {
+            if (string.IsNullOrEmpty(dataOverridePath) || !File.Exists(dataOverridePath)) return map;
+            string[] lines = File.ReadAllLines(dataOverridePath, Encoding.UTF8);
+            string cur = null;
+            var buf = new List<string>();
+            foreach (string raw in lines)
+            {
+                string line = raw ?? "";
+                if (line.StartsWith("###", StringComparison.Ordinal))
+                {
+                    if (cur != null) map[cur] = buf;
+                    cur = line.Substring(3).Trim();
+                    buf = new List<string>();
+                    continue;
+                }
+                if (cur == null) continue;
+                buf.Add(UnescapeItem(line));
+            }
+            if (cur != null) map[cur] = buf;
+        }
+        catch { }
+        return map;
+    }
 
 
     void ClearAndDisposeControls(Control parent)
@@ -563,6 +527,27 @@ public partial class MainForm : Form
 
     // ===================== 工具页（挤服助手 + 屏幕准星） =====================
 
+    // 让"关于"贴在标签栏最右侧：中间插一个只有宽度的空白页
+    void ApplyDevToolsTab(bool show)
+    {
+        try
+        {
+            bool has = tabs.TabPages.Contains(devPage);
+            if (show && !has)
+            {
+                int idx = tabs.TabPages.IndexOf(aboutPage);
+                if (idx < 0) idx = tabs.TabPages.Count;
+                tabs.TabPages.Insert(idx, devPage);   // 插在「关于」前面，保持贴右
+                ThemeControlTree(devPage);
+            }
+            else if (!show && has)
+            {
+                tabs.TabPages.Remove(devPage);
+            }
+            LayoutAboutTab();
+        }
+        catch { }
+    }
 
     // ===================== 主题系统（跟随系统 / 夜间深色 / 护眼浅色） =====================
     void UpdateThemeSwitchLabel()
@@ -573,6 +558,32 @@ public partial class MainForm : Form
         else lblThemeSwitch.Text = "☀ 主题：护眼浅色";
     }
 
+    void ApplyToolSubTabStyle()
+    {
+        if (bToolJoin == null || bToolCross == null) return;
+        Button[] btns = { bToolJoin, bToolCross, bToolTimer };
+        for (int i = 0; i < btns.Length; i++)
+        {
+            Button b = btns[i];
+            if (b == null) continue;
+            bool active = (toolSubIdx == i);
+            b.FlatStyle = FlatStyle.Flat;
+            if (IsDark)
+            {
+                b.BackColor = active ? Color.FromArgb(27, 47, 74) : Color.FromArgb(28, 33, 40);
+                b.ForeColor = active ? Color.FromArgb(121, 192, 255) : Color.FromArgb(139, 148, 158);
+                b.FlatAppearance.BorderColor = active ? Color.FromArgb(56, 139, 253) : Color.FromArgb(48, 54, 61);
+                b.FlatAppearance.MouseOverBackColor = active ? Color.FromArgb(35, 60, 94) : Color.FromArgb(36, 43, 52);
+            }
+            else
+            {
+                b.BackColor = active ? Color.FromArgb(219, 234, 254) : Color.FromArgb(248, 250, 252);
+                b.ForeColor = active ? Color.FromArgb(24, 64, 128) : Color.FromArgb(51, 65, 85);
+                b.FlatAppearance.BorderColor = active ? Color.FromArgb(147, 197, 253) : Color.FromArgb(203, 213, 225);
+                b.FlatAppearance.MouseOverBackColor = Color.Empty;
+            }
+        }
+    }
 
     void HookDarkScrollBar(Control c)
     {
@@ -729,7 +740,7 @@ public partial class MainForm : Form
         else if (root is Button)
         {
             var b = (Button)root;
-            if (b != btnAuto && b != btnHotkeyOff && b != btnTimerStart && b != btnTimerVis && (flpTimerPresets == null || b.Parent != flpTimerPresets))
+            if (b != btnAuto && b != btnHotkeyOff && b != bToolJoin && b != bToolCross && b != bToolTimer && b != btnTimerStart && b != btnTimerVis && (flpTimerPresets == null || b.Parent != flpTimerPresets))
             {
                 string tagStr = Convert.ToString(b.Tag);
                 if (IsDark)
@@ -888,8 +899,9 @@ public partial class MainForm : Form
         if (bottomBar != null) bottomBar.BackColor = IsDark ? Color.FromArgb(28, 33, 40) : Color.FromArgb(241, 245, 249);
 
         ThemeControlTree(this);
-        UpdatePlayerToolBar();
+        if (devPage != null && devPage.Parent == null) ThemeControlTree(devPage);
 
+        ApplyToolSubTabStyle();
         UpdateStartButton();
         UpdateHotkeyToggleButton();
         UpdateTimerButtonsStyle();
@@ -1359,7 +1371,8 @@ public partial class MainForm : Form
             bootTimer.Start();
         }
         if (Environment.GetEnvironmentVariable("RX_DUMP_UI") == "1") DumpUi();
-        UpdatePlayerToolBar();
+        CheckPendingDataOnStartup();
+        CheckLegacyMigrationNoticeOnStartup();
         // 启动后静默检查更新（失败不打扰）
         if (autoUpdateOn && !startupCheckDone)
         {

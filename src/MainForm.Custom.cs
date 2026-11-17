@@ -27,6 +27,10 @@ public partial class MainForm
     // ===================== 自定义文本 =====================
 
     string customPath = "";
+    string dataOverridePath = "";
+    string[] dataTabLabels = new string[0];
+    List<string>[] dataTabLists = new List<string>[0];
+    string[][] dataTabBase = new string[0][];   // 内置原始数据，恢复内置时可免重启回滚
     string[] cTitles = new string[0];
     string[] cTexts = new string[0];
 
@@ -603,8 +607,8 @@ public partial class MainForm
 
         if (cTitles.Length == 0)
         {
-            cTitles = new string[] { "示例快捷文本" };
-            cTexts = new string[] { "点击左上角「⚙ 编辑条目」即可修改或新增你常用的快捷发言、公告或备忘（单击卡片自动复制到剪贴板）" };
+            cTitles = new string[] { "MTF开局广播" };
+            cTexts = new string[] { "MTF优先接科研，允许逗留轻收，普科持枪警告，防化持危险品击毙" };
             SaveCustom();
         }
         rebuildCards();

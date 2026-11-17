@@ -7,10 +7,15 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
+#if ADMIN_EDITION
 [assembly: AssemblyTitle("RX 工具箱")]
 [assembly: AssemblyProduct("RX 工具箱")]
-[assembly: AssemblyDescription("GMod 挤服助手 + 屏幕准星 + 对局倒计时 + 自定义常用文本")]
-[assembly: AssemblyCompany("RXToolbox")]
+#else
+[assembly: AssemblyTitle("RX 工具箱")]
+[assembly: AssemblyProduct("RX 工具箱")]
+#endif
+[assembly: AssemblyDescription("GMod 指令/模型/职业速查 + 挤服 + 准星")]
+[assembly: AssemblyCompany("RXSEND Breach mio")]
 [assembly: AssemblyVersion("1.8.0.0")]
 [assembly: AssemblyFileVersion("1.8.0.0")]
 
@@ -160,6 +165,9 @@ static class Program
 
         bool createdNew;
         string mutexName = @"Local\RXToolbox_SingleInstance_Mutex";
+#if ADMIN_EDITION
+        mutexName += "_Admin";
+#endif
         // 开发用：--dev 或 RX_MULTI=1 可以让多个实例并存（正式版开着也能测 DEV 版）
         bool isDev = Environment.GetEnvironmentVariable("RX_MULTI") == "1";
         foreach (string a in args)
@@ -185,6 +193,18 @@ static class Program
                 }
                 return;
             }
+            if (!isDev && string.IsNullOrEmpty(g_migratedFrom) && Environment.GetEnvironmentVariable("RX_DUMP_UI") != "1")
+            {
+                if (TryMigrateLegacyExeName(selfPid))
+                {
+                    if (ownsMutex)
+                    {
+                        try { mutex.ReleaseMutex(); } catch { }
+                        ownsMutex = false;
+                    }
+                    return;
+                }
+            }
             try
             {
                 RunApp(afterUpdatePid > 0);
@@ -200,6 +220,31 @@ static class Program
         }
     }
 
+    // 数据文件的地址：优先用 settings.ini 里 UpdateUrl 同目录的 phrases.json
+    static string DeriveDataUrl(string dataDir)
+    {
+        const string Default = "https://rx-toolbox.pages.dev/phrases.json";
+        try
+        {
+            string ini = Path.Combine(dataDir, "settings.ini");
+            if (File.Exists(ini))
+            {
+                foreach (string line in File.ReadAllLines(ini))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    if (line.Substring(0, eq).Trim() != "UpdateUrl") continue;
+                    string v = line.Substring(eq + 1).Trim();
+                    if (v.Length == 0) break;
+                    int slash = v.LastIndexOf('/');
+                    if (slash <= 0) break;
+                    return v.Substring(0, slash + 1) + "phrases.json";
+                }
+            }
+        }
+        catch { }
+        return Default;
+    }
 
     static void RunApp(bool afterUpdate)
     {
@@ -236,11 +281,67 @@ static class Program
         }
 
         Native.LogPath = Path.Combine(dataDir, "rx.log");
-        MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, "", afterUpdate);
+        MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(dataDir, "phrases.json"), afterUpdate);
+        if (!string.Equals(dataDir, exeDir, StringComparison.OrdinalIgnoreCase))
+            MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(exeDir, "phrases.json"), false);
+
+        // 数据从 phrases.json 读（不再编进 exe）：先找数据目录，再退回 exe 目录
+        string phrases = Path.Combine(dataDir, "phrases.json");
+        if (!MainForm.Data.Load(phrases) && !string.Equals(dataDir, exeDir, StringComparison.OrdinalIgnoreCase))
+            MainForm.Data.Load(Path.Combine(exeDir, "phrases.json"));
+        if (!MainForm.Data.Loaded)
+        {
+            // 从 1.7.0 升级上来的用户：老版本的更新器不会下载数据文件，
+            // 所以这里自愈一次，把 phrases.json 拉下来
+            Native.Log("data: 没找到 phrases.json，尝试自动获取");
+            string dataUrl = DeriveDataUrl(dataDir);
+            if (!string.IsNullOrEmpty(dataUrl) &&
+                (dataUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                 dataUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
+            {
+                string target = Path.Combine(dataDir, "phrases.json");
+                try
+                {
+                    var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(dataUrl);
+                    req.Timeout = 6000;
+                    req.ReadWriteTimeout = 6000;
+                    req.Proxy = null;
+                    req.UserAgent = "RXToolbox-FirstRun";
+                    using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
+                    using (var st = resp.GetResponseStream())
+                    using (var fs = File.Create(target))
+                    {
+                        st.CopyTo(fs);
+                    }
+                    if (new FileInfo(target).Length > 1024)
+                    {
+                        MainForm.Data.Load(target);
+                        Native.Log("data: 自动下载成功 " + target);
+                    }
+                    else
+                    {
+                        try { File.Delete(target); } catch { }
+                    }
+                }
+                catch (Exception ex) { Native.Log("data: 自动下载失败 " + ex.Message); }
+            }
+        }
+        if (!MainForm.Data.Loaded)
+            Native.Log("data: 仍然没有数据（界面会是空表，可重新下载完整压缩包）");
+        else
+            Native.Log("data: " + MainForm.Data.SourcePath);
 
         var titles = new List<string>();
         var lists = new List<string[]>();
 
+#if ADMIN_EDITION
+        titles.Add("指令表"); lists.Add(MainForm.Data.Command);
+        titles.Add("技能表"); lists.Add(MainForm.Data.Ability);
+        titles.Add("物品表"); lists.Add(MainForm.Data.Weapon);
+        titles.Add("模型表"); lists.Add(MainForm.Data.Model);
+        titles.Add("角色表"); lists.Add(MainForm.Data.Job);
+        titles.Add("SCP角色"); lists.Add(MainForm.Data.Scp);
+#endif
 
         string icoPath = Path.Combine(exeDir, "rx.ico");
         MainForm form = null;
