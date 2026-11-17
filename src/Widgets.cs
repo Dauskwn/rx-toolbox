@@ -530,6 +530,7 @@ public class WrapList : Control
     public bool[] Heads = new bool[0];
     public string[] Notes = new string[0];   // 标题后的注解：小一号、斜体、灰色
     public string EmptyText = "（暂无条目）";
+    public bool DefaultCollapsed = false;
     public Font HeadFont;
     public Font SubFont;
     public int Sel = -1;
@@ -537,6 +538,7 @@ public class WrapList : Control
     public event EventHandler SelChanged;
     public event EventHandler ItemActivated;
     public event MouseEventHandler ItemRightClick;
+    public event EventHandler CollapseChanged;
 
     const int BarWidth = 16;
     bool barVisible = false;
@@ -626,6 +628,54 @@ public class WrapList : Control
     public bool IsCollapsed(int index)
     {
         return index >= 0 && index < collapsed.Length && collapsed[index];
+    }
+
+    public bool HasCollapsible()
+    {
+        for (int i = 0; i < canCollapse.Length; i++)
+            if (canCollapse[i]) return true;
+        return false;
+    }
+
+    public bool AreAllCollapsed()
+    {
+        bool any = false;
+        for (int i = 0; i < canCollapse.Length; i++)
+        {
+            if (!canCollapse[i]) continue;
+            any = true;
+            if (!collapsed[i]) return false;
+        }
+        return any;
+    }
+
+    public void SetAllCollapsed(bool collapse)
+    {
+        if (animTimer != null) animTimer.Stop();
+        bool changed = false;
+        for (int i = 0; i < canCollapse.Length; i++)
+        {
+            if (!canCollapse[i]) continue;
+            if (collapsed[i] != collapse || animActive[i])
+            {
+                collapsed[i] = collapse;
+                animActive[i] = false;
+                animFrac[i] = collapse ? 0f : 1f;
+                changed = true;
+            }
+        }
+        if (collapse && Sel >= 0 && IsRowHidden(Sel))
+        {
+            Sel = -1;
+            if (SelChanged != null) SelChanged(this, EventArgs.Empty);
+        }
+        if (changed)
+        {
+            layoutValid = false;
+            EnsureHeights();
+            Invalidate();
+            if (CollapseChanged != null) CollapseChanged(this, EventArgs.Empty);
+        }
     }
 
     internal bool TestHasStandardDoubleClick()
@@ -743,6 +793,17 @@ public class WrapList : Control
                 }
             }
         }
+        else if (DefaultCollapsed)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (canCollapse[i])
+                {
+                    collapsed[i] = true;
+                    animFrac[i] = 0f;
+                }
+            }
+        }
     }
 
     public void SetData(string[] labels, string[] values, bool[] heads)
@@ -774,6 +835,7 @@ public class WrapList : Control
         if (Sel >= Labels.Length || (Sel >= 0 && IsRowHidden(Sel))) Sel = -1;
         EnsureHeights();
         Invalidate();
+        if (CollapseChanged != null) CollapseChanged(this, EventArgs.Empty);
     }
 
     Font PreviewFontOf(int k)
@@ -992,6 +1054,7 @@ public class WrapList : Control
             layoutValid = false;
             EnsureHeights();
             Invalidate();
+            if (CollapseChanged != null) CollapseChanged(this, EventArgs.Empty);
             return;
         }
         animStartFrac[index] = animFrac[index];
@@ -1001,6 +1064,7 @@ public class WrapList : Control
         EnsureHeights();
         Invalidate();
         animTimer.Start();
+        if (CollapseChanged != null) CollapseChanged(this, EventArgs.Empty);
     }
 
     void OnAnimTick(object sender, EventArgs e)
@@ -1105,6 +1169,7 @@ public class WrapList : Control
         scrollY = y;
         UpdateBar();
         Invalidate();
+        if (changed && CollapseChanged != null) CollapseChanged(this, EventArgs.Empty);
     }
 
     void EnsureHeights()

@@ -122,9 +122,9 @@ public partial class MainForm
 #endif
 
         // ---- 4. JSON 转义 ----
-        string raw = "引号\"反斜杠\\换行\n制表\t中文";
+        string raw = "引号\"反斜杠\\换行\n制表\t控制\u000b\u000c中文";
         string esc = JsonEsc(raw);
-        chk("JSON 往返", JsonUnesc(esc) == raw, "得到 " + Esc0(JsonUnesc(esc)));
+        chk("JSON 往返", JsonUnesc(esc) == raw && esc.IndexOf("\\u000b", StringComparison.Ordinal) >= 0, "得到 " + Esc0(JsonUnesc(esc)));
         chk("JSON 字段读取", JsonField("{\"a\":\"x\\ny\",\"b\":2}", "a") == "x\ny", "");
         string pathSnap = "C:\\Games\\SteamLibrary\\steamapps\\common\\GarrysMod\\garrysmod\\addons\\sample\\file.txt";
         string pathJson = "{\"ok\":true,\"data\":\"" + JsonEsc(pathSnap) + "\"}";
@@ -365,11 +365,11 @@ public partial class MainForm
             string strippedWarn = StripWarnChangelogLine("!!【重要提醒】测试", out sawWarnLine);
 #if ADMIN_EDITION
             chk("管理版窗口标题后缀标识", APP_EDITION_SUFFIX == "（管理版）", APP_EDITION_SUFFIX);
-            chk("更新日志 1.8.1 与重要提示高亮标记格式",
-                CHANGELOG.Length > 1
-                && CHANGELOG[0].StartsWith("1.8.1|", StringComparison.Ordinal)
-                && CHANGELOG[1].StartsWith("1.8.0|", StringComparison.Ordinal)
-                && CHANGELOG[1].Contains("Rx工具箱.exe")
+            chk("更新日志 1.8.2 与重要提示高亮标记格式",
+                CHANGELOG.Length > 2
+                && CHANGELOG[0].StartsWith("1.8.2|", StringComparison.Ordinal)
+                && CHANGELOG[2].StartsWith("1.8.0|", StringComparison.Ordinal)
+                && CHANGELOG[2].Contains("Rx工具箱.exe")
                 && sawWarnLine && strippedWarn.StartsWith("【重要提醒】", StringComparison.Ordinal), "");
 #else
             chk("公开版更新日志、无管理后缀与独立更新源配置检查",
@@ -459,6 +459,20 @@ public partial class MainForm
                 chk("分类折叠：禁用双击吞点击且动画中快速连点多个分类均即时生效",
                     multiOk && expandOk && refoldOk,
                     "c1=" + wl.IsCollapsed(1) + " c4=" + wl.IsCollapsed(4));
+
+                wl.DefaultCollapsed = true;
+                wl.SetData(new string[0], new string[0], new bool[0], new string[0]);
+                wl.SetData(wLabels, wValues, wHeads, wNotes);
+                bool startAllFolded = !wl.IsCollapsed(0) && wl.IsCollapsed(1) && wl.IsCollapsed(4) && wl.IsCollapsed(6) && wl.IsCollapsed(7) && wl.AreAllCollapsed();
+                wl.ToggleSection(1, false);
+                wl.SetData(wLabels, wValuesUlx, wHeads, wNotes);
+                bool keepUserAdj = !wl.IsCollapsed(1) && wl.IsCollapsed(4) && !wl.AreAllCollapsed();
+                wl.SetAllCollapsed(false);
+                bool expandedAll = !wl.IsCollapsed(1) && !wl.IsCollapsed(4) && !wl.IsCollapsed(6) && !wl.IsCollapsed(7) && !wl.AreAllCollapsed();
+                wl.SetAllCollapsed(true);
+                bool collapsedAll = wl.AreAllCollapsed();
+                chk("分类折叠：默认全收起、单次运行保留手动状态与一键全部展开/收起",
+                    startAllFolded && keepUserAdj && expandedAll && collapsedAll, "");
             }
 #endif
 

@@ -18,7 +18,7 @@ using Windows.Storage.Streams;
 
 public partial class MainForm : Form
 {
-    public const string APP_VERSION = "V1.8.1";
+    public const string APP_VERSION = "V1.8.2";
 
     Overlay overlay;
     Toast toast;
@@ -68,7 +68,9 @@ public partial class MainForm : Form
     bool suppressTimerCtrl = false;
     int lastAddedTriggerMode = 0;
     ToolTip timerPresetTip;
-    DateTime lastTimerTopmost = DateTime.MinValue;
+    DateTime lastOverlayTopmost = DateTime.MinValue;
+    IntPtr lastFgHwnd = IntPtr.Zero;
+    DateTime fgBoostTopmostAt = DateTime.MinValue;
     Dictionary<Control, Color> origFore = new Dictionary<Control, Color>();
     Dictionary<Control, Color> origBack = new Dictionary<Control, Color>();
     Dictionary<Button, FlatStyle> origFlatStyle = new Dictionary<Button, FlatStyle>();
@@ -102,7 +104,7 @@ public partial class MainForm : Form
     public const string UPDATE_URL_DEFAULT = "https://rx-tools.pages.dev/version.json";
     public const string APP_EDITION_SUFFIX = "";
 #endif
-    public const string APP_VERSION_NUM = "1.8.1";
+    public const string APP_VERSION_NUM = "1.8.2";
     public const string APP_BUILD_DATE = "2026-11-17";
     string updateUrl = UPDATE_URL_DEFAULT;
     TabPage aboutPage, spacerPage, customPage;
@@ -155,7 +157,7 @@ public partial class MainForm : Form
             else if (c == '\n') sb.Append("\\n");
             else if (c == '\r') sb.Append("\\r");
             else if (c == '\t') sb.Append("\\t");
-            else if (c < ' ') sb.Append(' ');
+            else if (c < ' ') sb.Append("\\u" + ((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
             else sb.Append(c);
         }
         return sb.ToString();
@@ -1406,10 +1408,25 @@ public partial class MainForm : Form
             }
         }
 
-        if (timerOverlay != null && timerOverlay.Visible && (DateTime.Now - lastTimerTopmost).TotalSeconds >= 2.0)
+        bool needOverlay = (overlay != null && overlay.Visible);
+        bool needTimer = (timerOverlay != null && timerOverlay.Visible);
+        if (needOverlay || needTimer)
         {
-            lastTimerTopmost = DateTime.Now;
-            try { Native.MakeTopmost(timerOverlay.Handle); } catch { }
+            DateTime now = DateTime.Now;
+            IntPtr fg = Native.GetForegroundWindow();
+            if (fg != lastFgHwnd)
+            {
+                lastFgHwnd = fg;
+                fgBoostTopmostAt = now.AddMilliseconds(220);
+            }
+            bool boostDue = (fgBoostTopmostAt != DateTime.MinValue && now >= fgBoostTopmostAt);
+            if (boostDue) fgBoostTopmostAt = DateTime.MinValue;
+            if (boostDue || (now - lastOverlayTopmost).TotalSeconds >= 2.0)
+            {
+                lastOverlayTopmost = now;
+                if (needOverlay) { try { Native.MakeTopmost(overlay.Handle); } catch { } }
+                if (needTimer) { try { Native.MakeTopmost(timerOverlay.Handle); } catch { } }
+            }
         }
 
         if (autoOn)

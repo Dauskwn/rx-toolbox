@@ -731,9 +731,19 @@ public partial class MainForm
         btnCats.Enabled = false;          // 有分组时才可用
         searchPanel.Controls.Add(btnCats);
 
+        var btnToggleFold = new Button();
+        btnToggleFold.Text = "全部展开";
+        btnToggleFold.SetBounds(92, 74, 80, 28);
+        btnToggleFold.FlatStyle = FlatStyle.Flat;
+        btnToggleFold.FlatAppearance.BorderColor = Color.Silver;
+        btnToggleFold.ForeColor = Color.FromArgb(40, 70, 120);
+        btnToggleFold.BackColor = Color.FromArgb(232, 240, 252);
+        btnToggleFold.Enabled = false;
+        searchPanel.Controls.Add(btnToggleFold);
+
         var btnEditItems = new Button();
         btnEditItems.Text = "编辑条目";
-        btnEditItems.SetBounds(6, 74, 164, 28);
+        btnEditItems.SetBounds(6, 74, 82, 28);
         btnEditItems.BackColor = Color.FromArgb(232, 240, 252);
         btnEditItems.ForeColor = Color.FromArgb(24, 64, 128);
         btnEditItems.FlatStyle = FlatStyle.Flat;
@@ -865,6 +875,7 @@ public partial class MainForm
 
         var list = new WrapList();
         list.Dock = DockStyle.Fill;
+        list.DefaultCollapsed = true;
         list.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
         page.Controls.Add(list);
         list.BringToFront();
@@ -920,6 +931,20 @@ public partial class MainForm
         };
         preview.Resize += delegate { fitPreview(); };
 
+        Action syncFoldBtn = delegate
+        {
+            bool hasCol = list.HasCollapsible();
+            btnToggleFold.Enabled = hasCol;
+            btnToggleFold.Text = (!hasCol || list.AreAllCollapsed()) ? "全部展开" : "全部收起";
+        };
+        list.CollapseChanged += delegate { syncFoldBtn(); };
+        btnToggleFold.Click += delegate
+        {
+            if (!list.HasCollapsible()) return;
+            list.SetAllCollapsed(!list.AreAllCollapsed());
+            list.Focus();
+        };
+
         Action rebuildView = delegate
         {
             vLabels = new string[shownN];
@@ -946,6 +971,7 @@ public partial class MainForm
             bool anyHead = false;
             for (int k = 0; k < shownN; k++) { if (vHeads[k]) { anyHead = true; break; } }
             btnCats.Enabled = anyHead;
+            syncFoldBtn();
         };
 
         Action<string> applyFilter = delegate(string q)
@@ -1576,7 +1602,13 @@ public partial class MainForm
     static string DevCell(string s)
     {
         if (string.IsNullOrEmpty(s)) return "";
-        return s.Replace("\r\n", " ").Replace("\n", " ").Replace("\t", " ").Trim();
+        var sb = new StringBuilder(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            sb.Append(c < ' ' ? ' ' : c);
+        }
+        return sb.ToString().Trim();
     }
 
 }
