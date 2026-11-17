@@ -582,6 +582,7 @@ public class WrapList : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
                | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw
                | ControlStyles.Selectable, true);
+        SetStyle(ControlStyles.StandardDoubleClick, false);
         TabStop = true;
         BackColor = Color.White;
         HeadFont = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
@@ -625,6 +626,24 @@ public class WrapList : Control
     public bool IsCollapsed(int index)
     {
         return index >= 0 && index < collapsed.Length && collapsed[index];
+    }
+
+    internal bool TestHasStandardDoubleClick()
+    {
+        return GetStyle(ControlStyles.StandardDoubleClick);
+    }
+
+    internal int TestRowTop(int index)
+    {
+        return ItemTop(index);
+    }
+
+    internal void TestSimulateFastClickAtY(int y, int driftYDuringHold)
+    {
+        var down = new MouseEventArgs(MouseButtons.Left, 1, 16, y, 0);
+        OnMouseDown(down);
+        var up = new MouseEventArgs(MouseButtons.Left, 1, 16, y + driftYDuringHold, 0);
+        OnMouseClick(up);
     }
 
     bool IsMajorHead(int index)
@@ -1475,6 +1494,11 @@ public class WrapList : Control
             bool isHd = (idx < Heads.Length && Heads[idx]);
             if (isHd)
             {
+                if (e.Button == MouseButtons.Left && IsCollapsible(idx))
+                {
+                    mouseDownIdx = -2;
+                    ToggleSection(idx, true);
+                }
                 base.OnMouseDown(e);
                 return;
             }

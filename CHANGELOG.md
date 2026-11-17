@@ -1,5 +1,14 @@
 # 更新记录
 
+## 1.8.1（2026-11-17）
+
+### 修复与调整
+- **修复 `WrapList` 快速连点多分类标题失效**：禁用 `ControlStyles.StandardDoubleClick` 避免 500ms 内连续点击被判定为双击吞掉，并将可折叠标题切换提前到 `OnMouseDown` 即时触发，消除上方分组收起动画位移导致 `OnMouseClick` 点偏的问题（管理版自检增至 **78 项**）。
+- **补充管理版识别后缀**：主窗口标题、`关于` 页主标题以及 `exe` 程序集属性（`AssemblyTitle` / `AssemblyProduct` / `AssemblyDescription`）统一增加 `（管理版）` 标识，与玩家版明确区分。
+- **规范开源与免费声明**：将 [MainForm.About.cs](src/MainForm.About.cs) 与 [使用说明.txt](docs/使用说明.txt) 中的授权与开源措辞调整为标准 MIT License 表达，并明确提示请勿从任何付费或倒卖渠道购买。
+
+---
+
 ## 1.8.0（2026-11-17）
 
 > [!IMPORTANT]

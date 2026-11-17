@@ -8,16 +8,17 @@ using System.Threading;
 using System.Windows.Forms;
 
 #if ADMIN_EDITION
-[assembly: AssemblyTitle("RX 工具箱")]
-[assembly: AssemblyProduct("RX 工具箱")]
+[assembly: AssemblyTitle("RX 工具箱（管理版）")]
+[assembly: AssemblyProduct("RX 工具箱（管理版）")]
+[assembly: AssemblyDescription("GMod 服务器指令速查与辅助工具（管理版）")]
 #else
 [assembly: AssemblyTitle("RX 工具箱")]
 [assembly: AssemblyProduct("RX 工具箱")]
+[assembly: AssemblyDescription("GMod 挤服助手 + 屏幕准星 + 对局倒计时 + 自定义常用文本")]
 #endif
-[assembly: AssemblyDescription("GMod 指令/模型/职业速查 + 挤服 + 准星")]
-[assembly: AssemblyCompany("RXSEND Breach mio")]
-[assembly: AssemblyVersion("1.8.0.0")]
-[assembly: AssemblyFileVersion("1.8.0.0")]
+[assembly: AssemblyCompany("RXToolbox")]
+[assembly: AssemblyVersion("1.8.1.0")]
+[assembly: AssemblyFileVersion("1.8.1.0")]
 
 static class Program
 {
@@ -193,6 +194,7 @@ static class Program
                 }
                 return;
             }
+#if ADMIN_EDITION
             if (!isDev && string.IsNullOrEmpty(g_migratedFrom) && Environment.GetEnvironmentVariable("RX_DUMP_UI") != "1")
             {
                 if (TryMigrateLegacyExeName(selfPid))
@@ -205,6 +207,7 @@ static class Program
                     return;
                 }
             }
+#endif
             try
             {
                 RunApp(afterUpdatePid > 0);
@@ -220,6 +223,7 @@ static class Program
         }
     }
 
+#if ADMIN_EDITION
     // 数据文件的地址：优先用 settings.ini 里 UpdateUrl 同目录的 phrases.json
     static string DeriveDataUrl(string dataDir)
     {
@@ -245,6 +249,7 @@ static class Program
         catch { }
         return Default;
     }
+#endif
 
     static void RunApp(bool afterUpdate)
     {
@@ -281,6 +286,7 @@ static class Program
         }
 
         Native.LogPath = Path.Combine(dataDir, "rx.log");
+#if ADMIN_EDITION
         MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(dataDir, "phrases.json"), afterUpdate);
         if (!string.Equals(dataDir, exeDir, StringComparison.OrdinalIgnoreCase))
             MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(exeDir, "phrases.json"), false);
@@ -330,6 +336,9 @@ static class Program
             Native.Log("data: 仍然没有数据（界面会是空表，可重新下载完整压缩包）");
         else
             Native.Log("data: " + MainForm.Data.SourcePath);
+#else
+        MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, "", afterUpdate);
+#endif
 
         var titles = new List<string>();
         var lists = new List<string[]>();
@@ -356,7 +365,7 @@ static class Program
             return;
         }
 
-        form.Text = "RX 工具箱 " + MainForm.APP_VERSION + (g_dev ? " · DEV" : "");
+        form.Text = "RX 工具箱 " + MainForm.APP_VERSION + MainForm.APP_EDITION_SUFFIX + (g_dev ? " · DEV" : "");
 
         Application.Run(form);
     }

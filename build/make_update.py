@@ -52,22 +52,31 @@ def read_version():
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--edition", choices=("admin", "player"), default="admin", help="打包版本：admin（默认）或 player")
     ap.add_argument("--base", default="", help="站点根地址，例如 https://rx-toolbox.pages.dev")
     ap.add_argument("--version", default="", help="版本号，默认读 VERSION 文件")
     ap.add_argument("--notes", default="", help="更新说明，换行用 \\n")
-    ap.add_argument("--exe", default="", help="指定 exe 路径，默认取 dist 下最新的 *.exe（默认 Rx工具箱.exe）")
-    ap.add_argument("--fallback", default="", help="备用下载地址（QQ群/网盘），可留空")
-    ap.add_argument("--out", default=os.path.join(DIST, "update"), help="输出目录")
+    ap.add_argument("--exe", default="", help="指定 exe 路径")
+    ap.add_argument("--fallback", default="", help="备用下载地址，可留空")
+    ap.add_argument("--out", default="", help="输出目录")
     args = ap.parse_args()
+
+    is_player = (args.edition == "player")
+    base_url = args.base or ("https://rx-tools.pages.dev" if is_player else "")
+    fallback_url = args.fallback or ("https://github.com/Dauskwn/rx-tools/releases" if is_player else "")
+    out = args.out or os.path.join(DIST, "update-player" if is_player else "update")
 
     exe = args.exe
     if not exe:
-        cands = [os.path.join(DIST, f) for f in os.listdir(DIST)
-                 if f.lower().endswith(".exe") and "dev" not in f.lower()] if os.path.isdir(DIST) else []
-        if not cands:
-            print("找不到 exe，请用 --exe 指定", file=sys.stderr)
-            return 1
-        exe = max(cands, key=os.path.getmtime)
+        if is_player:
+            exe = os.path.join(DIST, "player", "Rx工具箱.exe")
+        else:
+            cands = [os.path.join(DIST, f) for f in os.listdir(DIST)
+                     if f.lower().endswith(".exe") and "dev" not in f.lower()] if os.path.isdir(DIST) else []
+            if not cands:
+                print("找不到 exe，请用 --exe 指定", file=sys.stderr)
+                return 1
+            exe = max(cands, key=os.path.getmtime)
 
     if not os.path.isfile(exe):
         print("exe 不存在：" + exe, file=sys.stderr)
@@ -75,61 +84,101 @@ def main():
 
     version = args.version or read_version()
     name = os.path.basename(exe)
-    if args.base:
-        url = args.base.rstrip("/") + "/" + quote(name)
+    if base_url:
+        url = base_url.rstrip("/") + "/" + quote(name)
     else:
         url = name
     notes = args.notes.replace("\\n", "\n")
 
-    out = args.out
     if not os.path.isdir(out):
         os.makedirs(out)
-    shutil.copy2(exe, os.path.join(out, name))
-
-    # 数据文件：程序更新时必须一起换，否则升级上来是空表
-    data_src = os.path.join(ROOT, "phrases.json")
-    data_url = ""
-    data_sha = ""
-    if os.path.isfile(data_src):
-        shutil.copy2(data_src, os.path.join(out, "phrases.json"))
-        data_url = (args.base.rstrip("/") + "/" + quote("phrases.json")) if args.base else "phrases.json"
-        data_sha = sha256_of(data_src)
     else:
-        print("警告：没找到 phrases.json，这次更新不带数据文件")
+        abs_exe = os.path.abspath(exe)
+        for fn in os.listdir(out):
+            fp = os.path.join(out, fn)
+            if os.path.abspath(fp) == abs_exe:
+                continue
+            if os.path.isdir(fp):
+                shutil.rmtree(fp)
+            else:
+                os.remove(fp)
+    shutil.copy2(exe, os.path.join(out, name))
 
     meta = {
         "version": version,
         "url": url,
-        "fallback": args.fallback,
+        "fallback": fallback_url,
         "sha256": sha256_of(exe),
         "notes": notes,
-        "minVersion": "1.5.0",
-        "dataUrl": data_url,
-        "dataSha256": data_sha,
+        "minVersion": "1.8.0" if is_player else "1.5.0",
     }
+
+    if not is_player:
+        # 数据文件：管理版程序更新时一起同步
+        data_src = os.path.join(ROOT, "phrases.json")
+        data_url = ""
+        data_sha = ""
+        if os.path.isfile(data_src):
+            shutil.copy2(data_src, os.path.join(out, "phrases.json"))
+            data_url = (base_url.rstrip("/") + "/" + quote("phrases.json")) if base_url else "phrases.json"
+            data_sha = sha256_of(data_src)
+        else:
+            print("警告：没找到 phrases.json，这次更新不带数据文件")
+        meta["dataUrl"] = data_url
+        meta["dataSha256"] = data_sha
+
     with io.open(os.path.join(out, "version.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
-    # Pages 是「整站替换」：不把 _worker.js 带上，/api/* 就会 404，
-    # 表现就是开发者工具里上传失败。每次部署都必须一起发。
-    worker_src = os.path.join(ROOT, "build", "pages", "_worker.js")
-    if os.path.isfile(worker_src):
-        shutil.copy2(worker_src, os.path.join(out, "_worker.js"))
+    if not is_player:
+        # Pages 是「整站替换」：不把 _worker.js 带上，/api/* 就会 404，
+        # 表现就是开发者工具里上传失败。每次部署管理版都必须一起发。
+        worker_src = os.path.join(ROOT, "build", "pages", "_worker.js")
+        if os.path.isfile(worker_src):
+            shutil.copy2(worker_src, os.path.join(out, "_worker.js"))
+        else:
+            print("警告：没找到 build/pages/_worker.js，这次部署会让 /api/* 失效")
     else:
-        print("警告：没找到 build/pages/_worker.js，这次部署会让 /api/* 失效")
+        pworker_src = os.path.join(ROOT, "build", "pages", "player_worker.js")
+        if os.path.isfile(pworker_src):
+            shutil.copy2(pworker_src, os.path.join(out, "_worker.js"))
 
-    headers = (
-        "/version.json\n"
-        "  Cache-Control: no-store\n"
-        "\n"
-        "/phrases.json\n"
-        "  Cache-Control: no-store\n"
-        "\n"
-        "/*.exe\n"
-        "  Cache-Control: public, max-age=3600\n"
-        "  Content-Disposition: attachment\n"
-    )
+    with io.open(os.path.join(out, "robots.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("User-agent: *\nDisallow: /\n")
+    with io.open(os.path.join(out, "_routes.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(
+            {
+                "version": 1,
+                "include": ["/*"],
+                "exclude": ["/robots.txt", "/favicon.ico"],
+            },
+            f,
+            indent=2,
+        )
+        f.write("\n")
+
+    if is_player:
+        headers = (
+            "/version.json\n"
+            "  Cache-Control: no-store\n"
+            "\n"
+            "/*.exe\n"
+            "  Cache-Control: public, max-age=3600\n"
+            "  Content-Disposition: attachment\n"
+        )
+    else:
+        headers = (
+            "/version.json\n"
+            "  Cache-Control: no-store\n"
+            "\n"
+            "/phrases.json\n"
+            "  Cache-Control: no-store\n"
+            "\n"
+            "/*.exe\n"
+            "  Cache-Control: public, max-age=3600\n"
+            "  Content-Disposition: attachment\n"
+        )
     with io.open(os.path.join(out, "_headers"), "w", encoding="utf-8", newline="\n") as f:
         f.write(headers)
 
@@ -138,8 +187,8 @@ def main():
     print("  version.json  version=" + version)
     print("                url=" + url)
     print("                sha256=" + meta["sha256"][:16] + "...")
-    if args.base:
-        print("把这个目录拖到 Cloudflare Pages 即可发布。")
+    if base_url:
+        print("把这个目录部署到 Cloudflare Pages（" + base_url + "）即可发布。")
     else:
         print("提示：加 --base https://xxx.pages.dev 才能生成完整下载地址。")
     return 0

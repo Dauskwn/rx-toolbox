@@ -24,6 +24,7 @@ public partial class MainForm
         {
             var sb = new StringBuilder();
             sb.AppendLine("RX 工具箱 UI dump  " + APP_VERSION + "  " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendLine("title " + Text);
             sb.AppendLine("form " + ClientSize.Width + "x" + ClientSize.Height);
             for (int t = 0; t < tabs.TabPages.Count; t++)
             {
@@ -60,6 +61,7 @@ public partial class MainForm
     {
         int pass = 0, fail = 0;
         var sb = new StringBuilder();
+#if ADMIN_EDITION
         // 数据在 exe 旁边就先生效，方便跑数据体检
         try
         {
@@ -69,6 +71,9 @@ public partial class MainForm
         catch { }
         sb.AppendLine("RX 工具箱自检 " + APP_VERSION + " " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
         sb.AppendLine("数据：" + (Data.Loaded ? Data.SourcePath : "未找到 phrases.json（数据相关断言会跳过）"));
+#else
+        sb.AppendLine("RX 工具箱自检 " + APP_VERSION + " " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+#endif
         sb.AppendLine();
 
         Action<string, bool, string> chk = delegate(string name, bool ok, string detail)
@@ -77,6 +82,7 @@ public partial class MainForm
             else { fail++; sb.AppendLine("  FAIL  " + name + "    " + detail); }
         };
 
+#if ADMIN_EDITION
         // ---- 1. 条目编码/解析往返 ----
         string[] samples = new string[]
         {
@@ -113,13 +119,14 @@ public partial class MainForm
         chk("ulx: 已有写法优先", UlxOf("!x ^", "ulx force_spawn ^ X") == "ulx force_spawn ^ X", "");
         chk("ulx: 非 ! 命令不变", UlxOf("stopsound", "") == "stopsound", UlxOf("stopsound", ""));
         chk("ulx: 已是 ulx 不变", UlxOf("ulx luarun X()", "") == "ulx luarun X()", "");
+#endif
 
         // ---- 4. JSON 转义 ----
         string raw = "引号\"反斜杠\\换行\n制表\t中文";
         string esc = JsonEsc(raw);
         chk("JSON 往返", JsonUnesc(esc) == raw, "得到 " + Esc0(JsonUnesc(esc)));
         chk("JSON 字段读取", JsonField("{\"a\":\"x\\ny\",\"b\":2}", "a") == "x\ny", "");
-        string pathSnap = "【模型表】\r\n标题\t主指令\t备用\tulx\t备注\r\n测试\tmodels\\tadano\\nu7_mio\\reimu.mdl\t\t\t";
+        string pathSnap = "C:\\Games\\SteamLibrary\\steamapps\\common\\GarrysMod\\garrysmod\\addons\\sample\\file.txt";
         string pathJson = "{\"ok\":true,\"data\":\"" + JsonEsc(pathSnap) + "\"}";
         string pathRead = JsonField(pathJson, "data");
         chk("JSON 反斜杠路径不二次反转义", pathRead == pathSnap, "得到 " + Esc0(pathRead));
@@ -130,7 +137,7 @@ public partial class MainForm
         chk("版本 1.6.0 == 1.6.0", CompareVersion("1.6.0", "1.6.0") == 0, "");
         chk("版本 1.5.9 < 1.6.0", CompareVersion("1.5.9", "1.6.0") < 0, "");
 
-
+#if ADMIN_EDITION
                 // ---- 5.4 目标名替换 ----
         chk("目标名：普通替换", ApplyTargetName("!strip ^", "暮嵐") == "!strip 暮嵐", ApplyTargetName("!strip ^", "暮嵐"));
         chk("目标名：含空格加引号", ApplyTargetName("!strip ^", "John Smith") == "!strip \"John Smith\"", ApplyTargetName("!strip ^", "John Smith"));
@@ -184,6 +191,7 @@ public partial class MainForm
             chk("指令里没有残留分隔符", badCmd == 0, badCmd + " 条");
             chk("显式 ulx 都以 ulx 开头", badUlx == 0, badUlx + " 条");
         }
+#endif
 
         // ---- 自动更新：下载 + 校验（用本地 file:// 真实走一遍） ----
         try
@@ -200,6 +208,7 @@ public partial class MainForm
             chk("更新下载 + SHA256 校验通过", DownloadAndVerify(fileUrl, goodSha, dest) && File.Exists(dest), "");
             chk("更新下载：哈希不对时拒绝", !DownloadAndVerify(fileUrl, new string('0', 64), Path.Combine(tmpDir, "bad.bin")), "");
             chk("更新下载：空哈希时拒绝", !DownloadAndVerify(fileUrl, "", Path.Combine(tmpDir, "emptysha.bin")), "");
+#if ADMIN_EDITION
             chk("MiniJson：损坏输入不死循环", MiniJson.Parse("{bad:123,@}") != null, "");
             var hubRows = ParseHubList("{\"ok\":true,\"items\":[{\"id\":\"2026-ab\",\"ts\":\"2026-11-16T12:00:00Z\",\"author\":\"王月\",\"note\":\"含{花括号}备注\",\"size\":2048}]}");
             chk("版本库列表：备注含花括号不丢失", hubRows.Count == 1 && hubRows[0][2] == "含{花括号}备注", "");
@@ -208,6 +217,7 @@ public partial class MainForm
                 && UlxOf("!devforcespawn ^ x", "") == "ulx dev_force_spawn ^ x"
                 && UlxOf("!forcescp ^ x", "") == "ulx force_scp ^ x"
                 && UlxOf("!forceround", "") == "ulx forceround", "");
+#endif
 
             chk("倒计时格式化 MM:SS",
                 CountdownOverlay.FormatMmSs(900) == "15:00"
@@ -263,10 +273,11 @@ public partial class MainForm
             Directory.CreateDirectory(updDir);
             string exeF = Path.Combine(updDir, "RXToolbox.exe");
             string updExeF = exeF + ".upd";
-            string dataF = Path.Combine(updDir, "phrases.json");
-            string updDataF = dataF + ".upd";
             File.WriteAllText(exeF, "OLD_EXE");
             File.WriteAllText(updExeF, "NEW_EXE_12345");
+#if ADMIN_EDITION
+            string dataF = Path.Combine(updDir, "phrases.json");
+            string updDataF = dataF + ".upd";
             File.WriteAllText(dataF, "OLD_DATA");
             File.WriteAllText(updDataF, "NEW_DATA_67890");
             string oldExeU, oldDataU, swapErr;
@@ -319,14 +330,58 @@ public partial class MainForm
                 && Program.IsRxToolboxProcessName("Rx工具箱")
                 && Program.IsRxToolboxProcessName("RX工具箱 V1.7")
                 && !Program.IsRxToolboxProcessName("notepad"), "");
+#else
+            string oldExeU, oldDataU, swapErr;
+            bool swapOk = ApplySelfUpdateFiles(
+                exeF, updExeF, new FileInfo(updExeF).Length,
+                "", "", 0,
+                out oldExeU, out oldDataU, out swapErr);
+            chk("自更新原地替换成功",
+                swapOk
+                && File.ReadAllText(exeF) == "NEW_EXE_12345"
+                && File.ReadAllText(oldExeU) == "OLD_EXE"
+                && !File.Exists(updExeF), swapErr);
+
+            RollbackSelfUpdateFiles(exeF, oldExeU, updExeF, "", "", "");
+            chk("自更新启动失败回滚成功",
+                File.ReadAllText(exeF) == "OLD_EXE"
+                && File.Exists(updExeF), "");
+
+            File.WriteAllText(exeF + ".old.999", "STALE");
+            CleanupUpdateArtifacts(exeF, "", false);
+            chk("自更新残留 .old/.upd 清理",
+                !File.Exists(exeF + ".old")
+                && !File.Exists(exeF + ".old.999")
+                && !File.Exists(updExeF), "");
+
+            File.WriteAllText(updExeF, "NEW_EXE_SIZE_TEST");
+            string dummyOldE, dummyOldD, badErr;
+            bool badSwap = ApplySelfUpdateFiles(exeF, updExeF, 999999L, "", "", 0, out dummyOldE, out dummyOldD, out badErr);
+            chk("自更新大小校验不符自动拒绝并保留旧版",
+                !badSwap && File.ReadAllText(exeF) == "OLD_EXE", badErr);
+#endif
 
             bool sawWarnLine;
             string strippedWarn = StripWarnChangelogLine("!!【重要提醒】测试", out sawWarnLine);
-            chk("更新日志 1.8.0 与重要提示高亮标记格式",
-                CHANGELOG.Length > 0 && CHANGELOG[0].StartsWith("1.8.0|", StringComparison.Ordinal)
-                && CHANGELOG[0].Contains("Rx工具箱.exe")
+#if ADMIN_EDITION
+            chk("管理版窗口标题后缀标识", APP_EDITION_SUFFIX == "（管理版）", APP_EDITION_SUFFIX);
+            chk("更新日志 1.8.1 与重要提示高亮标记格式",
+                CHANGELOG.Length > 1
+                && CHANGELOG[0].StartsWith("1.8.1|", StringComparison.Ordinal)
+                && CHANGELOG[1].StartsWith("1.8.0|", StringComparison.Ordinal)
+                && CHANGELOG[1].Contains("Rx工具箱.exe")
                 && sawWarnLine && strippedWarn.StartsWith("【重要提醒】", StringComparison.Ordinal), "");
+#else
+            chk("公开版更新日志、无管理后缀与独立更新源配置检查",
+                CHANGELOG.Length == 5
+                && CHANGELOG[0].StartsWith("1.8.0|", StringComparison.Ordinal)
+                && APP_EDITION_SUFFIX == ""
+                && UPDATE_URL_DEFAULT == "https://rx-tools.pages.dev/version.json"
+                && sawWarnLine && strippedWarn.StartsWith("【重要提醒】", StringComparison.Ordinal)
+                && !string.Join("\n", CHANGELOG).Contains("!!"), "");
+#endif
 
+#if ADMIN_EDITION
             // ---- 分类折叠列表（独立说明条兼容 / 大类嵌套 / 键盘跳过 / 切档保留） ----
             using (var wl = new WrapList())
             {
@@ -386,8 +441,28 @@ public partial class MainForm
                 wl.SetData(new string[] { "物品1" }, new string[] { "!g ^ 1" }, new bool[] { false }, new string[] { "" });
                 chk("分类折叠：进入筛选后复位折叠状态",
                     !wl.IsCollapsed(0) && wl.FindSelectable(0, 1) == 0, "");
-            }
 
+                // 验证禁用了 StandardDoubleClick 且动画进行中连点多个分类都能立即响应
+                wl.SetData(wLabels, wValues, wHeads, wNotes);
+                int top1 = wl.TestRowTop(1);
+                wl.TestSimulateFastClickAtY(top1 + 6, 0);
+                int top4DuringAnim = wl.TestRowTop(4);
+                // 模拟点击第 2 个分类时上方仍在收缩导致 MouseUp 坐标相对位移 20px
+                wl.TestSimulateFastClickAtY(top4DuringAnim + 6, 20);
+                bool multiOk = !wl.TestHasStandardDoubleClick() && wl.IsCollapsed(1) && wl.IsCollapsed(4);
+                // 同位置连续快速回点 2 次（相当于原地高速连击）也必须每次都切换成功
+                int top1Now = wl.TestRowTop(1);
+                wl.TestSimulateFastClickAtY(top1Now + 6, 0);
+                bool expandOk = !wl.IsCollapsed(1);
+                wl.TestSimulateFastClickAtY(top1Now + 6, 0);
+                bool refoldOk = wl.IsCollapsed(1);
+                chk("分类折叠：禁用双击吞点击且动画中快速连点多个分类均即时生效",
+                    multiOk && expandOk && refoldOk,
+                    "c1=" + wl.IsCollapsed(1) + " c4=" + wl.IsCollapsed(4));
+            }
+#endif
+
+#if ADMIN_EDITION
             // ---- 数据更新选择、差异对比与 .rxbak 本地备份/还原 ----
             var bAdded = new List<string>();
             var bChg = new List<string>();
@@ -473,6 +548,7 @@ public partial class MainForm
                 pruned == 3
                 && Directory.GetFiles(bakSubDir, "*_auto*.rxbak").Length == 2
                 && File.Exists(bakPkg), "pruned=" + pruned);
+#endif
 
             try { Directory.Delete(tmpDir, true); } catch { }
         }

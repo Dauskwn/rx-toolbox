@@ -840,7 +840,11 @@ public partial class MainForm
         int port;
         if (!ParseHostPort(ip, out host, out port))
         {
+#if ADMIN_EDITION
             toast.ShowText("格式写成 IP:端口，例如 43.249.193.77:27076");
+#else
+            toast.ShowText("格式写成 IP:端口，例如 127.0.0.1:27015");
+#endif
             return;
         }
         string addr = host + ":" + port;

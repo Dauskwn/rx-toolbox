@@ -1,11 +1,14 @@
 ﻿param(
-    [string]$OutName = ""    # 可选：指定产物文件名（默认 Rx工具箱.exe）
+    [string]$OutName = "",   # 可选：指定产物文件名（默认 Admin=dist\Rx工具箱.exe，Player=dist\player\Rx工具箱.exe）
+    [ValidateSet("Admin", "Player")]
+    [string]$Edition = "Admin"
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
+$isAdmin = ($Edition -eq "Admin")
 
 $verFile = Join-Path $root "VERSION"
 if (-not (Test-Path $verFile)) { throw "找不到 VERSION" }
@@ -20,7 +23,10 @@ foreach ($c in @(
 }
 if (-not $csc) { throw "未找到 csc.exe" }
 
-$srcFiles = Get-ChildItem (Join-Path $root "src") -Filter *.cs | Sort-Object Name | ForEach-Object { $_.FullName }
+$adminOnlyFiles = @("MainForm.Data.cs", "MainForm.DataBackup.cs", "MainForm.DevHub.cs")
+$srcFiles = Get-ChildItem (Join-Path $root "src") -Filter *.cs | Where-Object {
+    $isAdmin -or ($adminOnlyFiles -notcontains $_.Name)
+} | Sort-Object Name | ForEach-Object { $_.FullName }
 if (-not $srcFiles -or $srcFiles.Count -eq 0) { throw "未找到 src\*.cs 源码文件" }
 $prog = Join-Path $root "build\program.cs"
 $icon = Join-Path $root "rx.ico"
@@ -28,8 +34,9 @@ $icon = Join-Path $root "rx.ico"
 # 数据改成运行时读 phrases.json，不再需要 data.cs
 
 $dist = Join-Path $root "dist"
-New-Item -ItemType Directory -Path $dist -Force | Out-Null
-Get-ChildItem $dist -Filter *.exe -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+$outDir = if ($isAdmin) { $dist } else { Join-Path $dist "player" }
+New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+Get-ChildItem $outDir -Filter *.exe -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 $args0 = @(
     "/nologo", "/target:winexe", "/platform:x64", "/optimize+", "/utf8output",
@@ -37,11 +44,13 @@ $args0 = @(
 )
 if (Test-Path $icon) { $args0 += "/win32icon:$icon" }
 
-# 使用指南里的两张示意图（嵌进 exe，单文件分发）
-$imgSrv = Join-Path $root "img\guide_srv.jpg"
-$imgIp = Join-Path $root "img\guide_ip.png"
-if (Test-Path $imgSrv) { $args0 += "/resource:$imgSrv,guide_srv.jpg" }
-if (Test-Path $imgIp) { $args0 += "/resource:$imgIp,guide_ip.png" }
+# 使用指南里的两张示意图（仅管理版嵌进 exe；公开玩家版不含服务器列表与 IP 截图）
+if ($isAdmin) {
+    $imgSrv = Join-Path $root "img\guide_srv.jpg"
+    $imgIp = Join-Path $root "img\guide_ip.png"
+    if (Test-Path $imgSrv) { $args0 += "/resource:$imgSrv,guide_srv.jpg" }
+    if (Test-Path $imgIp) { $args0 += "/resource:$imgIp,guide_ip.png" }
+}
 
 # Windows OCR（0 体积，已移除废弃的 UIAutomation WPF 依赖）
 $winmd = "C:\Windows\System32\WinMetadata"
@@ -57,15 +66,16 @@ if (Test-Path $winmd) {
 }
 
 if ($OutName -and $OutName.Trim().Length -gt 0) {
-    $out = Join-Path $dist $OutName
+    $out = Join-Path $outDir $OutName
 } else {
-    $out = Join-Path $dist "Rx工具箱.exe"
+    $out = Join-Path $outDir "Rx工具箱.exe"
 }
-& $csc ($args0 + @("/define:ADMIN_EDITION", "/out:$out", $prog) + $srcFiles)
+$defineArg = if ($isAdmin) { "/define:ADMIN_EDITION" } else { "/define:PLAYER_EDITION" }
+& $csc ($args0 + @($defineArg, "/out:$out", $prog) + $srcFiles)
 if ($LASTEXITCODE -ne 0) { throw "编译失败 (exit $LASTEXITCODE)" }
 
 Write-Output ""
-Write-Output "  产物："
-Get-ChildItem $dist -Filter *.exe | ForEach-Object {
+Write-Output ("  产物（" + $Edition + "）：")
+Get-ChildItem $outDir -Filter *.exe | ForEach-Object {
     "    {0}  {1:N0} KB" -f $_.Name, ($_.Length / 1KB)
 }

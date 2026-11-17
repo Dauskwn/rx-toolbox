@@ -18,63 +18,7 @@ using Windows.Storage.Streams;
 
 public partial class MainForm
 {
-    static string Esc0(string s)
-    {
-        if (s == null) return "null";
-        return s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
-    }
-
     // ---------------- 在线版本库（Pages Functions + KV） ----------------
-    static string JsonEsc(string s)
-    {
-        if (s == null) return "";
-        var sb = new StringBuilder(s.Length + 16);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c == '"') sb.Append("\\\"");
-            else if (c == '\\') sb.Append("\\\\");
-            else if (c == '\n') sb.Append("\\n");
-            else if (c == '\r') sb.Append("\\r");
-            else if (c == '\t') sb.Append("\\t");
-            else if (c < ' ') sb.Append(' ');
-            else sb.Append(c);
-        }
-        return sb.ToString();
-    }
-
-    static string JsonUnesc(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        var sb = new StringBuilder(s.Length);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c == '\\' && i + 1 < s.Length)
-            {
-                char n = s[i + 1];
-                if (n == 'n') { sb.Append('\n'); i++; continue; }
-                if (n == 'r') { sb.Append('\r'); i++; continue; }
-                if (n == 't') { sb.Append('\t'); i++; continue; }
-                if (n == '"') { sb.Append('"'); i++; continue; }
-                if (n == '\\') { sb.Append('\\'); i++; continue; }
-                if (n == 'u' && i + 5 < s.Length)
-                {
-                    int code;
-                    if (int.TryParse(s.Substring(i + 2, 4), System.Globalization.NumberStyles.HexNumber,
-                        System.Globalization.CultureInfo.InvariantCulture, out code))
-                    {
-                        sb.Append((char)code);
-                        i += 5;
-                        continue;
-                    }
-                }
-            }
-            sb.Append(c);
-        }
-        return sb.ToString();
-    }
-
     string HubBase()
     {
         string b = hubUrl;
@@ -634,58 +578,6 @@ public partial class MainForm
         }
         AtomicWriteText(dataOverridePath, sb.ToString());
         HotApplyOverrides(tables);   // 立刻生效，不用重启
-    }
-
-    string PromptText(string title, string label, string def)
-    {
-        return PromptText(title, label, def, false);
-    }
-
-    string PromptText(string title, string label, string def, bool multiline)
-    {
-        using (var f = new Form())
-        {
-            f.Text = title;
-            f.FormBorderStyle = FormBorderStyle.FixedDialog;
-            f.StartPosition = FormStartPosition.CenterParent;
-            f.MaximizeBox = false;
-            f.MinimizeBox = false;
-            f.ClientSize = multiline ? new Size(480, 220) : new Size(400, 130);
-            var lb = new Label();
-            lb.Text = label;
-            lb.SetBounds(12, 12, f.ClientSize.Width - 24, 22);
-            f.Controls.Add(lb);
-            var tb = new TextBox();
-            tb.Text = def ?? "";
-            if (multiline)
-            {
-                tb.Multiline = true;
-                tb.AcceptsReturn = true;
-                tb.WordWrap = true;
-                tb.ScrollBars = ScrollBars.Vertical;
-                tb.SetBounds(12, 38, f.ClientSize.Width - 24, 122);
-            }
-            else
-            {
-                tb.SetBounds(12, 38, f.ClientSize.Width - 24, 24);
-            }
-            f.Controls.Add(tb);
-            int btnY = multiline ? 174 : 80;
-            var ok = new Button();
-            ok.Text = "确定";
-            ok.DialogResult = DialogResult.OK;
-            ok.SetBounds(f.ClientSize.Width - 188, btnY, 80, 30);
-            f.Controls.Add(ok);
-            var cancel = new Button();
-            cancel.Text = "取消";
-            cancel.DialogResult = DialogResult.Cancel;
-            cancel.SetBounds(f.ClientSize.Width - 100, btnY, 80, 30);
-            f.Controls.Add(cancel);
-            if (!multiline) f.AcceptButton = ok;
-            f.CancelButton = cancel;
-            ThemeDialog(f);
-            return f.ShowDialog(this) == DialogResult.OK ? tb.Text.Trim() : null;
-        }
     }
 
     TabPage BuildDevPage()
