@@ -52,36 +52,20 @@ public partial class MainForm
     static readonly string[] CHANGELOG = new string[]
     {
         "1.8.0|2026-11-17|" +
-            "!!【重要提醒 · 程序文件名改为 Rx工具箱.exe】本版起取消文件名版本号后缀，固定命名为「Rx工具箱.exe」（后续再升级版本也不再导致快捷方式失效）。此次更新完成后，原有的“V1.7”桌面快捷方式会失效，请删除旧快捷方式并右键「Rx工具箱.exe」重新创建，或手动修改原快捷方式的目标路径。~" +
-            "!!【重要提醒 · 自定义数据与备份核对】若你在旧版修改过指令/物品表等数据（曾生成 data-custom.txt），此前旧版更新可能未将官方新版数据同步到对应列表。1.8.0 起改为仅锁定实际改动过的页签，并在下方「数据对比与备份管理…」提供新旧差异对比、拉取最新官方表、按页清除覆盖以及 .rxbak 完整备份与选择性还原功能，建议更新后点开核对并备份！~" +
-            "新增分类折叠功能：直接点击任意含下属条目的分类标题栏（支持普通分组与 ▓ 一级大类）即可展开或收起，带约 150ms 平滑抽屉动画与旋转指示箭头；自动兼容“提示/说明”等无下属条目的独立横幅~" +
-            "折叠状态与键盘/搜索/分类跳转联动：切写法（ulx/devforcespawn）或填目标 ID 时保留折叠状态，点右上角「分类 ▾」自动展开目标分组，上下方向键自动跳过已折叠条目~" +
-            "新增「数据更新策略与本地备份管理」：程序更新含新版指令表时一定会先完整下载并校验，可选「弹窗询问我（默认）/ 自动替换未改页 / 仅存为 phrases.new.json 暂不替换」；完整快照（.rxbak）覆盖设置、自定义文案、指令修改、收藏夹与准星图~" +
-            "重构自动更新机制为纯 C# 原地改名替换（自检增至 76 项）：移除 PowerShell 编码脚本与 %TEMP% 中转，改为同目录 .upd 下载与 64 位 SHA256 校验 → .old 原地改名 → --after-update 退出握手与原子回滚，并支持自动将旧版「RX工具箱 V1.x.exe」原地迁移为「Rx工具箱.exe」",
+            "调整主界面结构：将「挤服助手」「屏幕准星」「倒计时」独立为主标签页直接切换，右上角常驻「关闭热键」「查看日志」「热键设置」工具栏~" +
+            "自定义页支持按标题与正文关键词实时筛选卡片（按 Esc 清空），并保留快捷编辑与剪贴板一键复制~" +
+            "完善独立更新通道：支持软件内检查更新、SHA256 校验与纯 C# 原地替换及失败自动回滚保护",
         "1.7.5|2026-11-17|" +
-            "优化数据表与指令写法：物品表重整枪械&近战与四类权限卡分组、补充百余条弹药种类备注并清理失效条目；修复角色与 SCP 表控制台 ulx 档位缺少下划线的问题~" +
             "新增「倒计时（时间链）」功能：纯数字点击穿透悬浮窗、多方案复制/新建与自定义变色 / 低中高频闪烁 / 描边文字标注事件链~" +
             "扩展全局热键至 8 项：新增 F9 倒计时开始/重置、Ctrl+F9 暂停/继续、F10 悬浮窗显隐，「退出工具」默认顺延为 Ctrl+F11~" +
-            "新增「护眼浅色（默认）/ 跟随系统 / 夜间深色」三档主题（全弹窗适配），自绘列表滚动条修复切换分辨率黑块问题并精简底部状态栏~" +
-            "修复自定义编辑页按钮遮挡及在线版本库路径/备注解析异常，优化挤服与版本库异步流畅度并强化更新校验（自检增至 55 项）",
-        "1.7.4|2026-11-15|" +
-            "增加了一些指令，优化使用体验",
+            "新增「护眼浅色（默认）/ 跟随系统 / 夜间深色」三档主题（全弹窗适配），自绘滚动条修复切换分辨率黑块问题并精简底部状态栏",
         "1.7.3|2026-11-15|" +
             "优化挤服识别：整屏 OCR 不再缩放图像；未识别到内容时单独检测加载画面左侧的“正在加载插件”~" +
-            "日志会在场景变化时记录 OCR 原文，便于后续排查",
-        "1.7.2|2026-11-15|" +
-            "修复 1.7.1 首次升级后表格为空的问题：启动时未启用 TLS 1.2 导致自动补全数据失败（未能创建 SSL/TLS 安全通道）~" +
-            "启动时默认启用 TLS 1.2 / 1.3，提升更新与数据拉取稳定性",
+            "日志会在场景变化时记录 OCR 原文，便于排查",
         "1.7.1|2026-11-15|" +
-            "新增“关闭热键”功能：可通过按钮或 Ctrl+F10 一键将 F5~F8 归还系统，下次启动自动恢复~" +
-            "移除“奇术终端”相关功能与页面~" +
-            "数据拆分为外置 phrases.json，主程序体积由 525 KB 降至 340 KB，调整数据无需重新编译~" +
-            "自动更新同步替换数据文件，升级后不会出现空表~" +
-            "“关于”页新增开源说明与仓库地址，问题反馈内补充 GitHub Issue 入口~" +
-            "修复窄窗口下 ulx 提示被截断的问题~" +
-            "自检断言由 37 条增至 39 条",
-        "1.7.0|2026-11-15|" +
-            "数据全面更新为服务器 v7 表：指令 113 / 技能 132 / 物品 870 / 模型 197 / 角色 289 / SCP 22~“职业表”更名为“角色表”，旧表名仍兼容导入~物品表按八大类分组，重复的 ▓ 大类由 14 个合并为 7 个~每条指令支持最多三种写法：主指令 / 原地替换（devforcespawn，仅角色表支持）/ 控制台 ulx~移除冗余的“备用写法”：同一武器多种代码拆分为多行展示，并在备注中标注短代码~ulx 写法覆盖全部 ! 指令：切换至该模式自动转为 ulx xxx，原生命令保持不变~目标 ID 输入框对所有页面生效，自动替换命令中的 ^，含空格的名称自动加引号~标题右侧的注解改为自适应换行，避免截断~条目编辑器支持单独修改 ulx 与注解，修改不会串入主指令~导入数据、下载版本与恢复内置数据均支持即时生效，无需重启~导入差异统计将“仅修改 ulx 或注解”计入修改数~修复修改任意设置会清空版本库地址和密钥的问题~新增“关于”页：启动时自动检查更新，点击“立即更新”自动下载、SHA256 校验并重启，支持回滚保护~新增在线版本库：支持上传、列表查看、下载与删除版本，由密钥识别上传者身份，无需手动填写名称~“关于”页固定至标签栏最右侧；开发者工具默认隐藏，在“关于 → 高级”中勾选后显示~修复 SCP 页 ulx 条数重复计算（22 条显示为 42）、自定义页“筛选”框超出窗口以及列表按 Esc 可清空筛选的问题~自检断言由 28 条增至 37 条",
+            "新增“关闭热键”功能：可通过按钮或 Ctrl+F10 一键将功能热键暂时交还系统，下次启动自动恢复",
+        "1.5.0|2026-11-15|" +
+            "挤服助手支持手动档 / 单一 IP / 收藏轮询三模式与 A2S 实时人数探测；OCR 移至后台线程不阻塞界面；支持外置准星导入与粘贴自定义图片",
     };
 
     static string StripWarnChangelogLine(string raw, out bool isWarn)
@@ -319,7 +303,7 @@ public partial class MainForm
         chkAutoUpdate = new CheckBox();
         chkAutoUpdate.Text = "启动时自动检查更新";
         chkAutoUpdate.Font = fSmall;
-        chkAutoUpdate.SetBounds(x + 318, y + 6, 220, 24);
+        chkAutoUpdate.SetBounds(x + 318, y + 6, 190, 24);
         chkAutoUpdate.Checked = autoUpdateOn;
         chkAutoUpdate.CheckedChanged += delegate
         {
@@ -327,6 +311,13 @@ public partial class MainForm
             SaveSettings();
         };
         host.Controls.Add(chkAutoUpdate);
+        var btnReleases = new Button();
+        btnReleases.Text = "GitHub 发布页";
+        btnReleases.FlatStyle = FlatStyle.Flat;
+        btnReleases.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
+        btnReleases.SetBounds(x + 518, y, 168, 34);
+        btnReleases.Click += delegate { TryOpenHttpUrl("https://github.com/Dauskwn/rx-toolbox/releases"); };
+        host.Controls.Add(btnReleases);
         y += 46;
 
         AddAboutText(host, "更新日志", x + 2, y, 120, fSmall, Color.FromArgb(110, 122, 140), 22);
@@ -342,82 +333,18 @@ public partial class MainForm
         RenderChangelog();
         y += 208;      // 与面板高度 196 对齐，别把下方标题压住
 
-        // ---------- 数据更新与本地备份 ----------
-        y = AddAboutSection(host, "数据更新与本地备份", x, y, w);
-
-        var lblDataStrat = AddAboutText(host, "更新时数据表处理：", x + 2, y + 4, 134, fSmall, cBody, 22);
-        lblDataStrat.TextAlign = ContentAlignment.MiddleLeft;
-
-        var cmbDataStrat = new ThemedComboBox();
-        cmbDataUpdateMode = cmbDataStrat;
-        cmbDataStrat.Font = fSmall;
-        cmbDataStrat.SetBounds(x + 138, y, 420, 26);
-        cmbDataStrat.Items.Add("更新时先下载，弹窗由我决定是否替换（推荐）");
-        cmbDataStrat.Items.Add("更新时自动替换未修改页（保留我改过的页）");
-        cmbDataStrat.Items.Add("更新时仅下载为 phrases.new.json（绝不自动替换）");
-        int selMode = (dataUpdateMode >= 0 && dataUpdateMode <= 2) ? dataUpdateMode : 0;
-        cmbDataStrat.SelectedIndex = selMode;
-        cmbDataStrat.SelectedIndexChanged += delegate
-        {
-            if (suppressSettingsSave) return;
-            dataUpdateMode = Math.Max(0, Math.Min(2, cmbDataStrat.SelectedIndex));
-            SaveSettings();
-        };
-        host.Controls.Add(cmbDataStrat);
-        y += 34;
-
-        var btnDataMgr = new Button();
-        btnDataMgr.Text = "数据对比与备份管理…";
-        btnDataMgr.FlatStyle = FlatStyle.Flat;
-        btnDataMgr.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
-        btnDataMgr.BackColor = Color.FromArgb(232, 240, 252);
-        btnDataMgr.ForeColor = Color.FromArgb(24, 64, 128);
-        btnDataMgr.SetBounds(x + 2, y, 168, 32);
-        btnDataMgr.Click += delegate { ShowDataBackupManager(this); };
-        host.Controls.Add(btnDataMgr);
-
-        var btnQuickBak = new Button();
-        btnQuickBak.Text = "＋ 立即备份全部";
-        btnQuickBak.FlatStyle = FlatStyle.Flat;
-        btnQuickBak.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
-        btnQuickBak.SetBounds(x + 178, y, 132, 32);
-        btnQuickBak.Click += delegate { QuickManualBackup(); };
-        host.Controls.Add(btnQuickBak);
-
-        lblPendingDataState = AddAboutText(host, "可随时对比新版数据、备份与还原全部个人配置",
-            x + 320, y + 6, w - 324, fSmall, Color.FromArgb(110, 122, 140), 22);
-        lblPendingDataState.AutoEllipsis = true;
-        UpdatePendingDataStateUi();
-        y += 42;
-
-        // ---------- 高级 ----------
-        y = AddAboutSection(host, "高级", x, y, w);
-        chkDevTools = new CheckBox();
-        chkDevTools.Text = "显示开发者工具（校对/提交指令表用）";
-        chkDevTools.Font = fBody;
-        chkDevTools.SetBounds(x + 2, y, 420, 24);
-        chkDevTools.Checked = devToolsOn;
-        chkDevTools.CheckedChanged += delegate
-        {
-            if (devToolsLoading) return;
-            devToolsOn = chkDevTools.Checked;
-            SaveSettings();
-            ApplyDevToolsTab(devToolsOn);
-        };
-        host.Controls.Add(chkDevTools);
-        y += 32;
 
         // ---------- 声明 ----------
         y = AddAboutSection(host, "声明", x, y, w);
 
         AddAboutText(host, "使用范围", x + 2, y, w - 4, fSmall, Color.FromArgb(110, 122, 140), 20);
         y += 22;
-        y = AddAboutPara(host, "仅供 [CN]Neo RXBreach mio 服使用。数据不保证时效性，服务器改版后请以实测为准。",
+        y = AddAboutPara(host, "适用于 Garry's Mod 游戏玩家日常游玩与对局辅助（倒计时内置标准预设适配 Breach 玩法，支持自由修改与新建）。",
             x + 2, y, w - 14, fBody, cBody);
 
         AddAboutText(host, "用途", x + 2, y, w - 4, fSmall, Color.FromArgb(110, 122, 140), 20);
         y += 22;
-        y = AddAboutPara(host, "本工具主要面向 mio 服管理员，为日常查询与操作提供便利，部分数据含有管理 / 开发者指令。\n不建议把含有管理指令的版本在公开渠道传播。",
+        y = AddAboutPara(host, "提供服务器 A2S 状态探测与自动挤服（支持系统 OCR 识别进服）、桌面置顶透明准星、点击穿透对局倒计时与自定义常用文本快捷复制等功能。",
             x + 2, y, w - 14, fBody, cBody);
 
         AddAboutText(host, "授权", x + 2, y, w - 4, fSmall, Color.FromArgb(110, 122, 140), 20);
@@ -449,28 +376,20 @@ public partial class MainForm
 
         AddAboutText(host, "免责", x + 2, y, w - 4, fSmall, Color.FromArgb(110, 122, 140), 20);
         y += 22;
-        y = AddAboutPara(host, "因使用本工具产生的任何直接或间接后果，作者不承担任何责任。游戏内行为以服务器规则为准，滥用指令导致的后果与作者无关。\n若本工具存在侵权、违反服务器规则的行为，请联系作者进行修改或删除处理。",
+        y = AddAboutPara(host, "因使用本工具产生的任何直接或间接后果，作者不承担任何责任。游戏内行为请遵守各服务器规则。\n若本工具存在侵权、违反服务器规则的行为，请联系作者进行修改或删除处理。",
             x + 2, y, w - 14, fBody, cBody);
         y += 10;
         // ---------- 署名与鸣谢 ----------
         y = AddAboutSection(host, "署名与鸣谢", x, y, w);
         AddAboutText(host, "作者：暮嵐拂晓", x + 2, y, w - 4, fBody, cBody, 22);
         y += 24;
-        AddAboutText(host, "合作开发者：王月qwe", x + 2, y, w - 4, fBody, cBody, 22);
-        y += 24;
-        AddAboutText(host, "特别鸣谢（指令列表来源参考）：1不错1、惜雨晨", x + 2, y, w - 4, fBody, cBody, 22);
-        y += 24;
-        AddAboutText(host, "感谢 CN RXSEND 社区众多开发者和管理员的用爱发电", x + 2, y, w - 4, fHint, cHint, 22);
+        AddAboutText(host, "感谢所有参与测试并提出改进建议的玩家朋友", x + 2, y, w - 4, fHint, cHint, 22);
         y += 26;
 
 
         // ---------- 反馈 ----------
         y = AddAboutSection(host, "反馈", x, y, w);
-        AddAboutText(host, "指令有误、想加功能，直接发我标题截图即可。", x + 2, y, w - 4, fBody, cBody, 24);
-        y += 26;
-        AddAboutText(host, "联系方式：QQ 1578785769（加好友，或发邮件到 1578785769@qq.com）", x + 2, y, w - 4, fBody, cBody, 24);
-        y += 26;
-        AddAboutText(host, "也可以在 GitHub 提 Issue：", x + 2, y, w - 4, fBody, cBody, 24);
+        AddAboutText(host, "遇到问题或想提新功能建议，欢迎前往 GitHub 提交 Issue：", x + 2, y, w - 4, fBody, cBody, 24);
         y += 24;
 
         var lnkIssue = new LinkLabel();
@@ -515,7 +434,7 @@ public partial class MainForm
             tip.Text = "更新源为个人自建的 Cloudflare 地址，部分地区或时段可能无法访问。\r\n\r\n" +
                        "自动更新流程：下载 → 校验 → 替换 → 重启。若替换失败会自动保留旧版本，\r\n" +
                        "不会导致程序无法启动。\r\n\r\n" +
-                       "如多次尝试仍失败，可使用下方地址手动下载，或前往 mio 服管理大群的群文件获取最新版。";
+                       "如多次尝试仍失败，可使用下方地址手动下载，或前往 GitHub Releases 获取最新版。";
             f.Controls.Add(tip);
 
             var lab1 = new Label();
@@ -535,8 +454,8 @@ public partial class MainForm
             f.Controls.Add(box);
 
             var lab2 = new Label();
-            lab2.Text = "当前版本：" + APP_VERSION + "（" + APP_VERSION_NUM + "）　　QQ：1578785769";
-            lab2.SetBounds(14, 246, 460, 20);
+            lab2.Text = "当前版本：" + APP_VERSION + "（" + APP_VERSION_NUM + "）　　开源发布页：github.com/Dauskwn/rx-toolbox/releases";
+            lab2.SetBounds(14, 246, 520, 20);
             lab2.ForeColor = Color.FromArgb(110, 122, 140);
             f.Controls.Add(lab2);
 
@@ -621,7 +540,7 @@ public partial class MainForm
 
     // ================= 自动更新（同目录下载 → 校验 → 原地改名替换 → 重启握手） =================
     // 不经过 %TEMP% 与 PowerShell 脚本，直接同目录 .upd 下载校验并原地改名替换
-    // 同目录的 settings.ini / servers.txt / custom.txt / data-custom.txt 原样保留
+    // 同目录的 settings.ini / servers.txt / custom.txt 原样保留
     static bool IsHttpUrl(string u)
     {
         if (string.IsNullOrEmpty(u)) return false;
@@ -738,14 +657,6 @@ public partial class MainForm
                     {
                         if (TryDeleteFile(f, retryOld ? 3 : 1)) anyCleaned = true;
                     }
-                    foreach (string f in Directory.GetFiles(dir, "RX工具箱 V*.exe.old*"))
-                    {
-                        if (TryDeleteFile(f, retryOld ? 3 : 1)) anyCleaned = true;
-                    }
-                    foreach (string f in Directory.GetFiles(dir, "RX工具箱 V*.exe.upd"))
-                    {
-                        TryDeleteFile(f, 1);
-                    }
                 }
             }
             catch { }
@@ -762,12 +673,6 @@ public partial class MainForm
                 if (!string.IsNullOrEmpty(ddir) && Directory.Exists(ddir))
                 {
                     foreach (string f in Directory.GetFiles(ddir, dpat))
-                    {
-                        if (TryDeleteFile(f, 1)) anyCleaned = true;
-                    }
-                    string ovOld = Path.Combine(ddir, "data-custom.txt.old");
-                    if (File.Exists(ovOld) && TryDeleteFile(ovOld, 1)) anyCleaned = true;
-                    foreach (string f in Directory.GetFiles(ddir, "data-custom.txt.old.*"))
                     {
                         if (TryDeleteFile(f, 1)) anyCleaned = true;
                     }
@@ -943,22 +848,6 @@ public partial class MainForm
 
         if (updBusy) return;
 
-        string dataUrl = updLatestDataUrl, dataSha = updLatestDataSha;
-        string dataTarget = Path.Combine(dir, "phrases.json");
-        bool hasRemoteData = !string.IsNullOrEmpty(dataUrl) && !string.IsNullOrEmpty(dataSha) && dataSha.Length == 64;
-        string curDataSha = "";
-        if (hasRemoteData && File.Exists(dataTarget))
-        {
-            try { curDataSha = Sha256File(dataTarget); } catch { curDataSha = ""; }
-        }
-        bool dataChanged = hasRemoteData && !string.Equals(curDataSha, dataSha, StringComparison.OrdinalIgnoreCase);
-
-        bool needDownloadData = dataChanged;
-        bool replaceDataNow = true;
-        bool keepEditedTabs = true;
-
-        if (!DecideDataUpdateForSelfUpdate(dataChanged, updLatestVersion, out replaceDataNow, out keepEditedTabs))
-            return;
 
         if (updBusy) return;
         updBusy = true;
@@ -967,12 +856,9 @@ public partial class MainForm
 
         string sha = updLatestSha;
         string updExe = exePath + ".upd";
-        // 数据文件（phrases.json）跟 exe 一起下载到同目录 .upd，避免跨目录或 %TEMP% 落盘可疑文件
-        string updData = !needDownloadData ? "" : (dataTarget + ".upd");
         int pid = System.Diagnostics.Process.GetCurrentProcess().Id;
 
         TryDeleteFile(updExe, 1);
-        if (!string.IsNullOrEmpty(updData)) TryDeleteFile(updData, 1);
 
         var th = new Thread(delegate()
         {
@@ -981,20 +867,12 @@ public partial class MainForm
             {
                 if (!DownloadAndVerify(u, sha, updExe))
                     throw new Exception("程序文件校验不一致（可能下载不完整）");
-                if (needDownloadData)
-                {
-                    if (!IsHttpUrl(dataUrl))
-                        throw new Exception("数据文件地址格式无效");
-                    if (!DownloadAndVerify(dataUrl, dataSha, updData))
-                        throw new Exception("数据文件校验不一致（可能下载不完整）");
-                }
             }
             catch (Exception ex) { err = ex.Message; }
 
             if (isClosing)
             {
                 TryDeleteFile(updExe, 1);
-                TryDeleteFile(updData, 1);
                 return;
             }
 
@@ -1004,7 +882,6 @@ public partial class MainForm
                 if (err != null)
                 {
                     TryDeleteFile(updExe, 1);
-                    TryDeleteFile(updData, 1);
                     SetUpdState("自动更新失败：" + err + "，改为打开浏览器下载", Color.FromArgb(184, 88, 44));
                     if (btnUpdOpen != null) btnUpdOpen.Enabled = true;
                     if (!TryOpenHttpUrl(u)) ShowUpdateHelp();
@@ -1013,48 +890,14 @@ public partial class MainForm
 
                 long expect = 0;
                 try { expect = new FileInfo(updExe).Length; } catch { }
-                long expectData = 0;
-                if (needDownloadData && !string.IsNullOrEmpty(updData))
-                {
-                    try { expectData = new FileInfo(updData).Length; } catch { }
-                }
-
-                if (needDownloadData && replaceDataNow)
-                {
-                    string bakErr;
-                    CreateBackupSnapshot("auto", "升级到 v" + updLatestVersion + " 前自动备份", out bakErr);
-                }
-
-                string swapUpdData = (needDownloadData && replaceDataNow) ? updData : "";
-                string swapTargetData = (needDownloadData && replaceDataNow) ? dataTarget : "";
-                long swapExpectData = (needDownloadData && replaceDataNow) ? expectData : 0;
-                bool clearOv = (needDownloadData && replaceDataNow && !keepEditedTabs);
-
-                string oldExeUsed, oldDataUsed, oldOvUsed, swapErr;
-                if (!ApplySelfUpdateFiles(exePath, updExe, expect, swapTargetData, swapUpdData, swapExpectData,
-                    dataOverridePath, clearOv,
-                    out oldExeUsed, out oldDataUsed, out oldOvUsed, out swapErr))
+                string oldExeUsed, oldDataUsed, swapErr;
+                if (!ApplySelfUpdateFiles(exePath, updExe, expect, "", "", 0, out oldExeUsed, out oldDataUsed, out swapErr))
                 {
                     TryDeleteFile(updExe, 1);
-                    TryDeleteFile(updData, 1);
                     SetUpdState("原地替换失败：" + swapErr + "，已保留原程序，改为打开浏览器下载", Color.FromArgb(184, 88, 44));
                     if (btnUpdOpen != null) btnUpdOpen.Enabled = true;
                     if (!TryOpenHttpUrl(u)) ShowUpdateHelp();
                     return;
-                }
-
-                if (needDownloadData)
-                {
-                    if (replaceDataNow)
-                    {
-                        TryDeleteFile(PendingDataPath, 1);
-                    }
-                    else
-                    {
-                        string stgErr;
-                        if (!StagePendingDataFile(updData, PendingDataPath, out stgErr))
-                            Native.Log("stage pending data fail: " + stgErr);
-                    }
                 }
 
                 try
@@ -1068,9 +911,8 @@ public partial class MainForm
                 }
                 catch (Exception ex2)
                 {
-                    RollbackSelfUpdateFiles(exePath, oldExeUsed, updExe, swapTargetData, oldDataUsed, swapUpdData, dataOverridePath, oldOvUsed);
+                    RollbackSelfUpdateFiles(exePath, oldExeUsed, updExe, "", "", "");
                     TryDeleteFile(updExe, 1);
-                    TryDeleteFile(updData, 1);
                     SetUpdState("启动新版本失败：" + ex2.Message + "，已恢复旧版本，改为打开浏览器下载", Color.FromArgb(184, 88, 44));
                     if (btnUpdOpen != null) btnUpdOpen.Enabled = true;
                     if (!TryOpenHttpUrl(u)) ShowUpdateHelp();
@@ -1121,8 +963,6 @@ public partial class MainForm
             string fb = JsonField(json, "fallback");
             string notes = JsonField(json, "notes");
             string sha = JsonField(json, "sha256");
-            string dataUrl = JsonField(json, "dataUrl");
-            string dataSha = JsonField(json, "dataSha256");
             // JsonField 已把 \n 还原成真换行，这里不再处理
 
             try
@@ -1147,8 +987,6 @@ public partial class MainForm
                     updLatestUrl = dl;
                     updLatestFallback = fb;
                     updLatestSha = sha;
-                    updLatestDataUrl = dataUrl;
-                    updLatestDataSha = dataSha;
 
                     if (CompareVersion(ver, APP_VERSION_NUM) > 0)
                     {
@@ -1172,117 +1010,5 @@ public partial class MainForm
         updThread.Start();
     }
 
-    void CheckLegacyMigrationNoticeOnStartup()
-    {
-        if (string.IsNullOrEmpty(Program.MigratedFrom)) return;
-        if (Environment.GetEnvironmentVariable("RX_DUMP_UI") == "1") return;
-        string oldName = Program.MigratedFrom;
-        Native.Log("update: migrated legacy executable " + oldName + " -> " + Program.TARGET_EXE_NAME);
-        SafeBeginInvoke(delegate { ShowLegacyExeMigrationNotice(oldName); });
-    }
-
-    void ShowLegacyExeMigrationNotice(string oldExeName)
-    {
-        var dlg = new Form();
-        try
-        {
-            dlg.Text = "已升级到 V1.8.0 · 重要使用提醒";
-            dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-            dlg.StartPosition = FormStartPosition.CenterParent;
-            dlg.MinimizeBox = false;
-            dlg.MaximizeBox = false;
-            Font fWarn = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
-            Font fBody = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
-            dlg.Font = fBody;
-
-            string text1 = "1. 主程序已自动更名为「" + Program.TARGET_EXE_NAME + "」（原为 " + oldExeName + "）\r\n" +
-                           "今后升级版本号不再变更文件名。此次更新后，你桌面上指向旧版 V1.7 的快捷方式已失效，请删除旧快捷方式并右键「" +
-                           Program.TARGET_EXE_NAME + "」重新创建桌面快捷方式（或修改原目标路径）。";
-            Size sz1 = TextRenderer.MeasureText(text1, fWarn, new Size(514, 4000),
-                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
-            int p1H = Math.Max(92, sz1.Height + 20);
-
-            var p1 = new Panel();
-            p1.Tag = "rx-warn";
-            p1.BackColor = Color.FromArgb(255, 246, 229);
-            p1.SetBounds(16, 16, 540, p1H);
-            var p1Bar = new Panel();
-            p1Bar.Tag = "rx-warn-bar";
-            p1Bar.BackColor = Color.FromArgb(217, 119, 6);
-            p1Bar.Dock = DockStyle.Left;
-            p1Bar.Width = 4;
-            p1.Controls.Add(p1Bar);
-            var lbl1 = new Label();
-            lbl1.Font = fWarn;
-            lbl1.ForeColor = Color.FromArgb(166, 56, 12);
-            lbl1.BackColor = Color.Transparent;
-            lbl1.SetBounds(12, 10, 518, p1H - 16);
-            lbl1.UseMnemonic = false;
-            lbl1.Text = text1;
-            p1.Controls.Add(lbl1);
-            dlg.Controls.Add(p1);
-
-            int y = 16 + p1H + 14;
-            string text2 = "2. 曾自定义过指令/物品表用户提醒：\r\n" +
-                           "如果你在旧版本自定义编辑过条目（存在 data-custom.txt），此前部分版本更新可能未能将官方新版数据表同步覆盖进对应页签。" +
-                           "现在可在「关于 → 数据对比与备份管理…」查看新旧差异明细、单独拉取官方新版、按页还原，并使用 .rxbak 创建完整本地备份。";
-            Size sz2 = TextRenderer.MeasureText(text2, fBody, new Size(536, 4000),
-                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
-            int lbl2H = Math.Max(78, sz2.Height + 12);
-
-            var lbl2 = new Label();
-            lbl2.ForeColor = Color.FromArgb(58, 68, 84);
-            lbl2.SetBounds(16, y, 540, lbl2H);
-            lbl2.UseMnemonic = false;
-            lbl2.Text = text2;
-            dlg.Controls.Add(lbl2);
-
-            int btnY = y + lbl2H + 14;
-            dlg.ClientSize = new Size(572, btnY + 50);
-
-            bool openMgrAfter = false;
-
-            var bLocate = new Button();
-            bLocate.Text = "打开文件夹并选中 Rx工具箱.exe";
-            bLocate.SetBounds(16, btnY, 220, 34);
-            bLocate.Click += delegate
-            {
-                try
-                {
-                    using (var p = System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + Application.ExecutablePath + "\"")) { }
-                }
-                catch { }
-            };
-            dlg.Controls.Add(bLocate);
-
-            var bMgr = new Button();
-            bMgr.Text = "查看数据对比与备份…";
-            bMgr.SetBounds(244, btnY, 184, 34);
-            bMgr.Click += delegate
-            {
-                openMgrAfter = true;
-                dlg.DialogResult = DialogResult.OK;
-                dlg.Close();
-            };
-            dlg.Controls.Add(bMgr);
-
-            var bOk = new Button();
-            bOk.Text = "我知道了";
-            bOk.SetBounds(436, btnY, 120, 34);
-            bOk.DialogResult = DialogResult.OK;
-            dlg.Controls.Add(bOk);
-
-            dlg.AcceptButton = bOk;
-            dlg.CancelButton = bOk;
-            ThemeDialog(dlg);
-            dlg.ShowDialog(this);
-            if (openMgrAfter)
-                ShowDataBackupManager(this);
-        }
-        finally
-        {
-            try { dlg.Dispose(); } catch { }
-        }
-    }
 
 }

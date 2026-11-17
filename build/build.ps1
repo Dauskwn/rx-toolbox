@@ -1,5 +1,5 @@
-﻿param(
-    [string]$OutName = ""    # 可选：指定产物文件名（默认 Rx工具箱.exe）
+param(
+    [string]$OutName = ""   # 可选：指定产物文件名（默认 dist\Rx工具箱.exe）
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -10,7 +10,6 @@ Set-Location $root
 $verFile = Join-Path $root "VERSION"
 if (-not (Test-Path $verFile)) { throw "找不到 VERSION" }
 $verFull = (Get-Content $verFile -Raw).Trim()
-$verShort = ($verFull -split '\.')[0..1] -join '.'
 
 $csc = $null
 foreach ($c in @(
@@ -25,8 +24,6 @@ if (-not $srcFiles -or $srcFiles.Count -eq 0) { throw "未找到 src\*.cs 源码
 $prog = Join-Path $root "build\program.cs"
 $icon = Join-Path $root "rx.ico"
 
-# 数据改成运行时读 phrases.json，不再需要 data.cs
-
 $dist = Join-Path $root "dist"
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 Get-ChildItem $dist -Filter *.exe -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -37,13 +34,7 @@ $args0 = @(
 )
 if (Test-Path $icon) { $args0 += "/win32icon:$icon" }
 
-# 使用指南里的两张示意图（嵌进 exe，单文件分发）
-$imgSrv = Join-Path $root "img\guide_srv.jpg"
-$imgIp = Join-Path $root "img\guide_ip.png"
-if (Test-Path $imgSrv) { $args0 += "/resource:$imgSrv,guide_srv.jpg" }
-if (Test-Path $imgIp) { $args0 += "/resource:$imgIp,guide_ip.png" }
-
-# Windows OCR（0 体积，已移除废弃的 UIAutomation WPF 依赖）
+# Windows OCR（零体积原生系统 API，无额外第三方依赖）
 $winmd = "C:\Windows\System32\WinMetadata"
 $wrGac = "C:\Windows\Microsoft.NET\assembly\GAC_MSIL\System.Runtime.WindowsRuntime\v4.0_4.0.0.0__b77a5c561934e089\System.Runtime.WindowsRuntime.dll"
 if (Test-Path $winmd) {
@@ -61,7 +52,7 @@ if ($OutName -and $OutName.Trim().Length -gt 0) {
 } else {
     $out = Join-Path $dist "Rx工具箱.exe"
 }
-& $csc ($args0 + @("/define:ADMIN_EDITION", "/out:$out", $prog) + $srcFiles)
+& $csc ($args0 + @("/out:$out", $prog) + $srcFiles)
 if ($LASTEXITCODE -ne 0) { throw "编译失败 (exit $LASTEXITCODE)" }
 
 Write-Output ""

@@ -18,33 +18,8 @@ using Windows.Storage.Streams;
 
 public partial class MainForm
 {
-    TabPage BuildToolPage()
+    void CreateToolUtilityButtons(Control host)
     {
-        var page = new TabPage("工具");
-        page.BackColor = Color.White;
-        Font ui = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
-
-        var bJoin = new Button();
-        bJoin.Text = "挤服助手";
-        bJoin.FlatStyle = FlatStyle.Flat;
-        bJoin.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
-        bJoin.SetBounds(12, 10, 120, 36);
-        page.Controls.Add(bJoin);
-
-        var bCross = new Button();
-        bCross.Text = "屏幕准星";
-        bCross.FlatStyle = FlatStyle.Flat;
-        bCross.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
-        bCross.SetBounds(140, 10, 120, 36);
-        page.Controls.Add(bCross);
-
-        var bTimer = new Button();
-        bTimer.Text = "倒计时";
-        bTimer.FlatStyle = FlatStyle.Flat;
-        bTimer.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
-        bTimer.SetBounds(268, 10, 120, 36);
-        page.Controls.Add(bTimer);
-
         bLog = new Button();
         bLog.Text = "查看日志";
         bLog.SetBounds(624, 10, 96, 36);
@@ -63,7 +38,7 @@ public partial class MainForm
             }
             catch (Exception ex) { toast.ShowText("打不开日志：" + ex.Message); }
         };
-        page.Controls.Add(bLog);
+        host.Controls.Add(bLog);
 
         // 关闭热键：把 F5/F6… 还给系统（按钮本身也有 Ctrl+F10 开关）
         btnHotkeyOff = new Button();
@@ -73,17 +48,97 @@ public partial class MainForm
         btnHotkeyOff.ForeColor = Color.FromArgb(60, 90, 140);
         btnHotkeyOff.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
         btnHotkeyOff.Click += delegate { ToggleHotkeys(); };
-        page.Controls.Add(btnHotkeyOff);
+        host.Controls.Add(btnHotkeyOff);
 
         btnHotkey = new Button();
         btnHotkey.Text = "热键设置";
         btnHotkey.SetBounds(728, 10, 104, 36);
         btnHotkey.Click += delegate { ShowHotkeyDialog(); };
-        page.Controls.Add(btnHotkey);
+        host.Controls.Add(btnHotkey);
+    }
 
+    void AddPlayerStripDivider(TabPage page)
+    {
+        var div = new Panel();
+        div.SetBounds(8, 50, Math.Max(100, page.ClientSize.Width - 16), 1);
+        div.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        div.BackColor = Color.FromArgb(226, 232, 240);
+        page.Controls.Add(div);
+    }
+
+    void BuildPlayerToolPages()
+    {
+        joinPage = new TabPage("挤服助手");
+        joinPage.BackColor = Color.White;
+        AddPlayerStripDivider(joinPage);
+        CreateJoinPanel(joinPage, 54);
+
+        crossPage = new TabPage("屏幕准星");
+        crossPage.BackColor = Color.White;
+        AddPlayerStripDivider(crossPage);
+        CreateCrossPanel(crossPage, 54);
+
+        timerPage = new TabPage("倒计时");
+        timerPage.BackColor = Color.White;
+        AddPlayerStripDivider(timerPage);
+        CreateTimerPanel(timerPage, 54);
+
+        lblPlayerBarTip = new Label();
+        lblPlayerBarTip.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
+        lblPlayerBarTip.ForeColor = Color.FromArgb(90, 98, 112);
+        lblPlayerBarTip.AutoEllipsis = true;
+        lblPlayerBarTip.UseMnemonic = false;
+        lblPlayerBarTip.Text = "A2S 状态探测与自动挤服 · 支持手动档 / 单一 IP / 收藏轮询（OCR 自动停）";
+        lblPlayerBarTip.SetBounds(12, 17, 410, 22);
+        joinPage.Controls.Add(lblPlayerBarTip);
+        CreateToolUtilityButtons(joinPage);
+
+        joinPage.Resize += delegate { LayoutToolBar(); };
+        crossPage.Resize += delegate { LayoutToolBar(); };
+        timerPage.Resize += delegate { LayoutToolBar(); };
+
+        tabs.TabPages.Add(joinPage);
+        tabs.TabPages.Add(crossPage);
+        tabs.TabPages.Add(timerPage);
+
+        UpdatePlayerToolBar();
+        LayoutToolBar();
+        LayoutJoin();
+        LoadFavs();
+        FillSrvList();
+        ApplyModeUi();
+        UpdateHotkeyLabels();
+    }
+
+    void UpdatePlayerToolBar()
+    {
+        if (tabs == null || btnHotkey == null) return;
+        TabPage sel = tabs.SelectedTab;
+        if (sel == null && joinPage != null) sel = joinPage;
+        if (sel != joinPage && sel != crossPage && sel != timerPage) return;
+
+        if (lblPlayerBarTip != null && lblPlayerBarTip.Parent != sel) sel.Controls.Add(lblPlayerBarTip);
+        if (btnHotkeyOff != null && btnHotkeyOff.Parent != sel) sel.Controls.Add(btnHotkeyOff);
+        if (bLog != null && bLog.Parent != sel) sel.Controls.Add(bLog);
+        if (btnHotkey != null && btnHotkey.Parent != sel) sel.Controls.Add(btnHotkey);
+
+        if (lblPlayerBarTip != null)
+        {
+            if (sel == joinPage)
+                lblPlayerBarTip.Text = "A2S 状态探测与自动挤服 · 支持手动档 / 单一 IP / 收藏轮询（OCR 自动停）";
+            else if (sel == crossPage)
+                lblPlayerBarTip.Text = "桌面置顶透明准星 · 支持矢量调节与导入/粘贴自定义准星图";
+            else if (sel == timerPage)
+                lblPlayerBarTip.Text = "透明点击穿透倒计时 · 支持多方案管理与时间链变色 / 闪烁 / 标注";
+        }
+        LayoutToolBar();
+    }
+
+    Panel CreateJoinPanel(Control page, int topY)
+    {
         // ================= 挤服面板 =================
         var pJoin = new Panel();
-        pJoin.SetBounds(8, 54, page.ClientSize.Width - 16, page.ClientSize.Height - 62);
+        pJoin.SetBounds(8, topY, page.ClientSize.Width - 16, page.ClientSize.Height - topY - 8);
         pJoin.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         page.Controls.Add(pJoin);
 
@@ -336,12 +391,15 @@ public partial class MainForm
 
         pJoinPanel = pJoin;
         pJoin.Resize += delegate { LayoutJoin(); };
+        return pJoin;
+    }
 
+    Panel CreateCrossPanel(Control page, int topY)
+    {
         // ================= 准星面板 =================
         var pCross = new Panel();
-        pCross.SetBounds(8, 54, page.ClientSize.Width - 16, page.ClientSize.Height - 62);
+        pCross.SetBounds(8, topY, page.ClientSize.Width - 16, page.ClientSize.Height - topY - 8);
         pCross.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-        pCross.Visible = false;
         page.Controls.Add(pCross);
 
         btnCross = new Button();
@@ -521,12 +579,15 @@ public partial class MainForm
         lblCrossHint.ForeColor = Color.FromArgb(80, 90, 102);
         lblCrossHint.SetBounds(206, 98, 620, 160);
         pCross.Controls.Add(lblCrossHint);
+        return pCross;
+    }
 
+    Panel CreateTimerPanel(Control page, int topY)
+    {
         // ================= 倒计时（时间链）面板 =================
         var pTimer = new Panel();
-        pTimer.SetBounds(8, 54, page.ClientSize.Width - 16, page.ClientSize.Height - 62);
+        pTimer.SetBounds(8, topY, page.ClientSize.Width - 16, page.ClientSize.Height - topY - 8);
         pTimer.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-        pTimer.Visible = false;
         page.Controls.Add(pTimer);
         pTimerPanel = pTimer;
 
@@ -790,49 +851,19 @@ public partial class MainForm
         // 默认装入第 1 个方案（标准对局 18分）
         ApplyTimerPresetIndex(0, true);
         LayoutTimer();
-
-        bToolJoin = bJoin;
-        bToolCross = bCross;
-        bToolTimer = bTimer;
-        Font fToolBold = TrackFont("Microsoft YaHei UI", 10.5f, FontStyle.Bold);
-        Font fToolReg = TrackFont("Microsoft YaHei UI", 10.5f, FontStyle.Regular);
-        Action<int> switchTo = delegate(int which)
-        {
-            toolSubIdx = which;
-            pJoin.Visible = (which == 0);
-            pCross.Visible = (which == 1);
-            pTimer.Visible = (which == 2);
-            bJoin.Font = which == 0 ? fToolBold : fToolReg;
-            bCross.Font = which == 1 ? fToolBold : fToolReg;
-            bTimer.Font = which == 2 ? fToolBold : fToolReg;
-            ApplyToolSubTabStyle();
-            LayoutToolBar();
-            if (which == 2) LayoutTimer();
-        };
-        bJoin.Click += delegate { switchTo(0); };
-        bCross.Click += delegate { switchTo(1); };
-        bTimer.Click += delegate { switchTo(2); };
-        page.Resize += delegate { LayoutToolBar(); };
-        switchTo(0);
-
-        LayoutToolBar();
-        LayoutJoin();
-        LoadFavs();
-        FillSrvList();
-        ApplyModeUi();
-        UpdateHotkeyLabels();
-
-        return page;
+        return pTimer;
     }
 
     void LayoutToolBar()
     {
-        if (bToolJoin == null || bToolJoin.Parent == null) return;
-        int pageW = bToolJoin.Parent.ClientSize.Width;
+        if (btnHotkey == null || btnHotkey.Parent == null) return;
+        int pageW = btnHotkey.Parent.ClientSize.Width;
         if (pageW < 400) pageW = 400;
         if (btnHotkey != null) btnHotkey.SetBounds(pageW - 8 - 104, 10, 104, 36);
         if (bLog != null) bLog.SetBounds(pageW - 8 - 104 - 8 - 96, 10, 96, 36);
         if (btnHotkeyOff != null) btnHotkeyOff.SetBounds(pageW - 8 - 104 - 8 - 96 - 8 - 176, 10, 176, 36);
+        if (lblPlayerBarTip != null && btnHotkeyOff != null)
+            lblPlayerBarTip.SetBounds(12, 17, Math.Max(120, btnHotkeyOff.Left - 24), 22);
     }
 
     void LayoutTimer()
@@ -1883,11 +1914,6 @@ public partial class MainForm
                 {
                     themeMode = iv;
                 }
-                else if (k == "DataUpdateMode" && iv >= 0 && iv <= 2)
-                {
-                    dataUpdateMode = iv;
-                    if (cmbDataUpdateMode != null) cmbDataUpdateMode.SelectedIndex = iv;
-                }
                 else if (k == "JMode" && rbTapMode != null && iv >= 0 && iv <= 2)
                 {
                     suppressModeEvent = true;
@@ -1985,13 +2011,8 @@ public partial class MainForm
             sb.Append("TimerCustomChain=").Append(TimerChainPreset.SerializeNodes(timerNodes)).Append("\r\n");
             sb.Append("JMode=").Append(JoinModeIdx).Append("\r\n");
             sb.Append("AutoUpdate=").Append(autoUpdateOn ? 1 : 0).Append("\r\n");
-            sb.Append("DataUpdateMode=").Append(dataUpdateMode).Append("\r\n");
-            sb.Append("DevTools=").Append(devToolsOn ? 1 : 0).Append("\r\n");
             sb.Append("ThemeMode=").Append(themeMode).Append("\r\n");
             if (!string.IsNullOrEmpty(updateUrl)) sb.Append("UpdateUrl=").Append(updateUrl).Append("\r\n");
-            // 版本库地址与密钥也要写回，否则改任何设置都会把它们抹掉
-            if (!string.IsNullOrEmpty(hubUrl)) sb.Append("HubUrl=").Append(hubUrl).Append("\r\n");
-            if (!string.IsNullOrEmpty(hubKey)) sb.Append("HubKey=").Append(hubKey).Append("\r\n");
             // 收藏轮询的勾选偏好；一个都没勾也要写（表示"用户就是要全不选"）
             sb.Append("Checked=");
             if (lvSrv != null)
@@ -2277,15 +2298,17 @@ public partial class MainForm
             p3.BackColor = Color.White;
             p3.Padding = new Padding(10);
 
+            Image imgL = LoadGuideImg("guide_srv.jpg", ref guideImgL);
+            Image imgR = LoadGuideImg("guide_ip.png", ref guideImgR);
+
             var lb31 = new Label();
-            lb31.Text = "① 在游戏内点击目标服务器，右上角会弹出该服信息栏（下图红框）";
+            lb31.Text = (imgL != null)
+                ? "① 在游戏内点击目标服务器，右上角会弹出该服信息栏（下图红框）"
+                : "① 在游戏内服务器列表点击目标服务器，右上角会弹出该服信息栏";
             lb31.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
             lb31.ForeColor = Color.FromArgb(20, 60, 120);
             lb31.SetBounds(10, 10, 720, 22);
             p3.Controls.Add(lb31);
-
-            Image imgL = LoadGuideImg("guide_srv.jpg", ref guideImgL);
-            Image imgR = LoadGuideImg("guide_ip.png", ref guideImgR);
 
             if (imgL != null)
             {
@@ -2298,19 +2321,24 @@ public partial class MainForm
             }
 
             var lb32 = new Label();
-            lb32.Text = "左侧：游戏内的服务器列表，单击任意一行\r\n"
-                + "右上角：对应的服务器详情窗口\r\n\r\n"
-                + "选中服务器后，右上角详情栏才会显示完整的服务器名称和 IP:端口。";
+            lb32.Text = (imgL != null)
+                ? ("左侧：游戏内的服务器列表，单击任意一行\r\n"
+                   + "右上角：对应的服务器详情窗口\r\n\r\n"
+                   + "选中服务器后，右上角详情栏才会显示完整的服务器名称和 IP:端口。")
+                : ("进入游戏 → Play → 服务器列表，单击选中你常去的服务器；\r\n"
+                   + "选中后右侧/右上角详情栏就会显示完整的服务器名称和 IP:端口。");
             lb32.Font = TrackFont("Microsoft YaHei UI", 9f, FontStyle.Regular);
             lb32.ForeColor = Color.FromArgb(70, 80, 95);
-            lb32.SetBounds(imgL != null ? 360 : 10, 40, imgL != null ? 380 : 720, 100);
+            lb32.SetBounds(imgL != null ? 360 : 10, 40, imgL != null ? 380 : 720, imgL != null ? 100 : 54);
             p3.Controls.Add(lb32);
 
             var lb33 = new Label();
-            lb33.Text = "② 鼠标选中黄框内的 IP:端口，按 Ctrl+C 复制";
+            lb33.Text = (imgR != null)
+                ? "② 鼠标选中黄框内的 IP:端口，按 Ctrl+C 复制"
+                : "② 鼠标拖选服务器详情栏里的 IP:端口（如 127.0.0.1:27015），按 Ctrl+C 复制";
             lb33.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
             lb33.ForeColor = Color.FromArgb(20, 60, 120);
-            lb33.SetBounds(10, 236, 720, 22);
+            lb33.SetBounds(10, (imgL != null || imgR != null) ? 236 : 114, 720, 22);
             p3.Controls.Add(lb33);
 
             if (imgR != null)
@@ -2328,7 +2356,7 @@ public partial class MainForm
                 + "    程序会自动探测真实服务器名称并保存；如需删除，选中该行点击“删除选中”即可。";
             lb34.Font = TrackFont("Microsoft YaHei UI", 9f, FontStyle.Regular);
             lb34.ForeColor = Color.FromArgb(70, 80, 95);
-            lb34.SetBounds(10, imgR != null ? 440 : 300, 720, 56);
+            lb34.SetBounds(10, (imgR != null) ? 440 : ((imgL != null) ? 300 : 148), 720, 56);
             p3.Controls.Add(lb34);
 
             tabsG.TabPages.Add(p3);

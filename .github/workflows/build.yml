@@ -24,10 +24,9 @@ jobs:
         shell: pwsh
         run: |
           $env:RX_SELFTEST = '1'
-          Copy-Item phrases.json dist\phrases.json -Force
           $p = Start-Process -FilePath dist\Rx工具箱.exe -WorkingDirectory dist -Wait -PassThru
           Get-Content dist\selftest.log -Encoding UTF8
-          Remove-Item dist\phrases.json, dist\selftest.log -Force -ErrorAction SilentlyContinue
+          Remove-Item dist\selftest.log -Force -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
       - name: Show artifact
