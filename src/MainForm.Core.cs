@@ -18,7 +18,7 @@ using Windows.Storage.Streams;
 
 public partial class MainForm : Form
 {
-    public const string APP_VERSION = "V1.8.2";
+    public const string APP_VERSION = "V1.8.3";
 
     Overlay overlay;
     Toast toast;
@@ -104,8 +104,8 @@ public partial class MainForm : Form
     public const string UPDATE_URL_DEFAULT = "https://rx-tools.pages.dev/version.json";
     public const string APP_EDITION_SUFFIX = "";
 #endif
-    public const string APP_VERSION_NUM = "1.8.2";
-    public const string APP_BUILD_DATE = "2026-11-17";
+    public const string APP_VERSION_NUM = "1.8.3";
+    public const string APP_BUILD_DATE = "2026-11-19";
     string updateUrl = UPDATE_URL_DEFAULT;
     TabPage aboutPage, spacerPage, customPage;
     string dataRootDir = "";
@@ -270,6 +270,8 @@ public partial class MainForm : Form
     List<string> targets = new List<string>();
     string currentTargetAddr = "";
     IntPtr savedLayout = IntPtr.Zero;
+    IntPtr savedTempLayout = IntPtr.Zero;
+    bool notifiedInternalError = false;
     int multiIdx = 0;
     DateTime tapOcrAt = DateTime.MinValue;
     int tapOcrFail = 0;
@@ -311,6 +313,34 @@ public partial class MainForm : Form
 
     static readonly string[] GameProcs = { "gmod", "gmod_win64" };
     static readonly object[] TapIntervals = { "100 ms", "200 ms", "300 ms", "500 ms", "900 ms" };
+
+    public void NotifyInternalError()
+    {
+        if (notifiedInternalError) return;
+        notifiedInternalError = true;
+        SafeBeginInvoke(delegate
+        {
+            try { if (toast != null) toast.ShowText("发生内部错误，详情已写入 rx.log（点右上角“查看日志”可查看）"); }
+            catch { }
+        });
+    }
+
+    bool IsHotkeyPollAllowed()
+    {
+        try
+        {
+            IntPtr fg = Native.GetForegroundWindow();
+            if (fg == IntPtr.Zero) return false;
+            if (fg == Handle) return true;
+            using (var cur = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                if (Native.PidOf(fg) == cur.Id) return true;
+            }
+            string fp = Native.ForegroundProcess();
+            return Array.IndexOf(GameProcs, fp) >= 0;
+        }
+        catch { return false; }
+    }
 
     Font TrackFont(string family, float size, FontStyle style)
     {
@@ -605,7 +635,6 @@ public partial class MainForm : Form
             if (string.IsNullOrEmpty(body)) return;
             if (TrySetClipboardText(body))
             {
-                savedClipboardText = body;
                 toast.ShowText("已复制：" + title);
                 Native.Log("copy: " + title + " | " + body);
             }
@@ -1167,7 +1196,10 @@ public partial class MainForm : Form
                 toast.ShowText("剪贴板里的图片读不出来");
                 return;
             }
-            string dir = System.IO.Path.GetDirectoryName(Application.ExecutablePath);
+            string dir = !string.IsNullOrEmpty(dataRootDir)
+                ? dataRootDir
+                : System.IO.Path.GetDirectoryName(Application.ExecutablePath);
+            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
             string save = System.IO.Path.Combine(dir, "crosshair.png");
             string tmp = save + ".tmp";
             try
@@ -1175,8 +1207,15 @@ public partial class MainForm : Form
                 img.Save(tmp, System.Drawing.Imaging.ImageFormat.Png);   // 原图带 alpha 存盘
             }
             finally { img.Dispose(); }
-            if (File.Exists(save)) File.Delete(save);
-            File.Move(tmp, save);
+            if (File.Exists(save))
+            {
+                try { File.Replace(tmp, save, null); }
+                catch { File.Delete(save); File.Move(tmp, save); }
+            }
+            else
+            {
+                File.Move(tmp, save);
+            }
             Native.Log("crosshair paste -> " + save);
             LoadCrosshairImage(save, false);
         }
@@ -1338,9 +1377,12 @@ public partial class MainForm : Form
                     if (down && !prevHkDown[hi])
                     {
                         prevHkDown[hi] = true;
-                        Native.Log("POLL_HOTKEY id=" + id + " fg=" + ForegroundTitle());
-                        HandleHotkey(id);
-                        if (id == 5) return;
+                        if (IsHotkeyPollAllowed())
+                        {
+                            Native.Log("POLL_HOTKEY id=" + id + " fg=" + ForegroundTitle());
+                            HandleHotkey(id);
+                            if (id == 5) return;
+                        }
                     }
                     else if (!down)
                     {
@@ -1436,11 +1478,16 @@ public partial class MainForm : Form
                 if ((DateTime.Now - lastEnter).TotalMilliseconds >= IntervalMs)
                 {
                     string fgOld = Native.ForegroundProcess();
-                    if (Array.IndexOf(GameProcs, fgOld) >= 0)
+                    if (Array.IndexOf(GameProcs, fgOld) >= 0 && Interlocked.CompareExchange(ref pasteBusy, 1, 0) == 0)
                     {
-                        Native.PressEnter();
                         lastEnter = DateTime.Now;
                         sent++;
+                        ThreadPool.QueueUserWorkItem(delegate
+                        {
+                            try { Native.PressEnter(); }
+                            catch { }
+                            finally { Interlocked.Exchange(ref pasteBusy, 0); }
+                        });
                     }
                 }
             }
@@ -1520,8 +1567,35 @@ public partial class MainForm : Form
 
         if (!hotkeysOff && !HotkeysOk())
         {
-            Native.Log("hotkeys conflict: another instance or app holds hotkeys");
-            try { if (toast != null) toast.ShowText("部分热键被占用：可打开“热键设置”查看或修改按键"); } catch { }
+            bool otherEd = Program.IsOtherEditionRunning();
+            Native.Log(otherEd
+                ? "hotkeys conflict: opposite edition is running"
+                : "hotkeys conflict: another instance or app holds hotkeys");
+            try
+            {
+                if (toast != null)
+                {
+                    toast.ShowText(otherEd
+                        ? "另一个版本的 RX 工具箱正在运行，部分全局热键已被占用"
+                        : "部分热键被占用：可打开“热键设置”查看或修改按键");
+                }
+            }
+            catch { }
+        }
+        if (Program.AfterUpdate)
+        {
+            try
+            {
+                string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+#if ADMIN_EDITION
+                CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(dataRootDir, "phrases.json"), true);
+                if (!string.Equals(dataRootDir, exeDir, StringComparison.OrdinalIgnoreCase))
+                    CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(exeDir, "phrases.json"), false);
+#else
+                CleanupUpdateArtifacts(Application.ExecutablePath, "", true);
+#endif
+            }
+            catch { }
         }
         // 启动后自动刷一次服务器状态（人数 + 真实名），失败的再串行补查一遍
         if (favList.Length > 0)

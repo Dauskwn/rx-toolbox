@@ -41,6 +41,29 @@ public partial class MainForm
         return true;
     }
 
+    static string TabDiffItemKey(string raw, Dictionary<string, int> seen, ref string curMajor, ref string curSub, out string titleOut, out string joinedOut)
+    {
+        string t, m, a, u, n;
+        DevSplitItem(raw ?? "", out t, out m, out a, out u, out n);
+        titleOut = t;
+        joinedOut = DevJoinItem(t, m, a, u, n);
+        string scopeKey;
+        if (m.Length == 0)
+        {
+            if (t.StartsWith("▓")) { curMajor = t.Substring(1).Trim(); curSub = ""; }
+            else curSub = t;
+            scopeKey = "H|" + curMajor + "|" + t;
+        }
+        else
+        {
+            scopeKey = "I|" + curMajor + "|" + curSub + "|" + t;
+        }
+        int c0;
+        seen.TryGetValue(scopeKey, out c0);
+        seen[scopeKey] = c0 + 1;
+        return scopeKey + "#" + c0;
+    }
+
     public static void ComputeTabDiff(
         IList<string> curItems, IList<string> newItems,
         out int add, out int chg, out int del,
@@ -49,17 +72,14 @@ public partial class MainForm
         var before = new Dictionary<string, string>();
         var beforeTitles = new Dictionary<string, string>();
         var seen = new Dictionary<string, int>();
+        string curMajor = "", curSub = "";
         if (curItems != null)
         {
             for (int i = 0; i < curItems.Count; i++)
             {
-                string t, m, a, u, n;
-                DevSplitItem(curItems[i] ?? "", out t, out m, out a, out u, out n);
-                int c0;
-                seen.TryGetValue(t, out c0);
-                seen[t] = c0 + 1;
-                string key = t + "#" + c0;
-                before[key] = DevJoinItem(t, m, a, u, n);
+                string t, joined;
+                string key = TabDiffItemKey(curItems[i], seen, ref curMajor, ref curSub, out t, out joined);
+                before[key] = joined;
                 beforeTitles[key] = t;
             }
         }
@@ -67,17 +87,13 @@ public partial class MainForm
         add = 0; chg = 0; del = 0;
         var after = new Dictionary<string, string>();
         var seen2 = new Dictionary<string, int>();
+        curMajor = ""; curSub = "";
         if (newItems != null)
         {
             for (int i = 0; i < newItems.Count; i++)
             {
-                string t, m, a, u, n;
-                DevSplitItem(newItems[i] ?? "", out t, out m, out a, out u, out n);
-                int c0;
-                seen2.TryGetValue(t, out c0);
-                seen2[t] = c0 + 1;
-                string key = t + "#" + c0;
-                string joined = DevJoinItem(t, m, a, u, n);
+                string t, joined;
+                string key = TabDiffItemKey(newItems[i], seen2, ref curMajor, ref curSub, out t, out joined);
                 after[key] = joined;
                 string oldCmd;
                 if (!before.TryGetValue(key, out oldCmd))
@@ -151,6 +167,32 @@ public partial class MainForm
         }
     }
 
+    static byte[] RedactHubKeyFromSettings(byte[] raw)
+    {
+        if (raw == null || raw.Length == 0) return raw;
+        try
+        {
+            string text = Encoding.UTF8.GetString(raw);
+            string[] lines = text.Replace("\r\n", "\n").Split('\n');
+            var kept = new List<string>(lines.Length);
+            bool changed = false;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                int eq = line.IndexOf('=');
+                if (eq > 0 && line.Substring(0, eq).Trim() == "HubKey")
+                {
+                    changed = true;
+                    continue;
+                }
+                kept.Add(line);
+            }
+            if (!changed) return raw;
+            return new UTF8Encoding(false).GetBytes(string.Join("\r\n", kept.ToArray()));
+        }
+        catch { return raw; }
+    }
+
     public static bool CreateBackupArchiveToFile(
         string destPath, string dataDir, string exeDir, string customCrossPath,
         string kind, string note, out string err)
@@ -183,7 +225,11 @@ public partial class MainForm
                 if ((!File.Exists(src)) && fn == "phrases.json" && !string.IsNullOrEmpty(exeDir))
                     src = Path.Combine(exeDir, fn);
                 if (!string.IsNullOrEmpty(src) && File.Exists(src))
-                    writeEntry(fn, File.ReadAllBytes(src));
+                {
+                    byte[] rawBytes = File.ReadAllBytes(src);
+                    if (fn == "settings.ini") rawBytes = RedactHubKeyFromSettings(rawBytes);
+                    writeEntry(fn, rawBytes);
+                }
             }
 
             string crossSrc = "";
@@ -209,6 +255,79 @@ public partial class MainForm
         }
     }
 
+    static Dictionary<string, object> ParseBackupEnvelope(
+        string path, out string created, out string version, out string kind, out string note,
+        out Dictionary<string, object> rawMap, out string err)
+    {
+        created = ""; version = ""; kind = ""; note = "";
+        rawMap = null;
+        err = "";
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            err = "备份文件不存在";
+            return null;
+        }
+        string raw = File.ReadAllText(path, Encoding.UTF8);
+        var root = MiniJson.Parse(raw) as Dictionary<string, object>;
+        if (root == null)
+        {
+            err = "备份文件 JSON 格式无效";
+            return null;
+        }
+        object fObj;
+        if (!root.TryGetValue("format", out fObj) || Convert.ToString(fObj) != "rxtoolbox-backup-1")
+        {
+            err = "不支持的备份文件格式";
+            return null;
+        }
+        object o;
+        if (root.TryGetValue("created", out o) && o != null) created = Convert.ToString(o);
+        if (root.TryGetValue("version", out o) && o != null) version = Convert.ToString(o);
+        if (root.TryGetValue("kind", out o) && o != null) kind = Convert.ToString(o);
+        if (root.TryGetValue("note", out o) && o != null) note = Convert.ToString(o);
+
+        object filesObj;
+        if (!root.TryGetValue("files", out filesObj))
+        {
+            err = "备份文件中缺少内容清单";
+            return null;
+        }
+        rawMap = filesObj as Dictionary<string, object>;
+        if (rawMap == null)
+        {
+            err = "备份文件内容清单格式错误";
+            return null;
+        }
+        return root;
+    }
+
+    public static bool ParseBackupSummary(
+        string path, out string created, out string version, out string kind, out string note,
+        out List<string> fileKeys, out string err)
+    {
+        created = ""; version = ""; kind = ""; note = "";
+        fileKeys = new List<string>();
+        err = "";
+        try
+        {
+            Dictionary<string, object> rawMap;
+            if (ParseBackupEnvelope(path, out created, out version, out kind, out note, out rawMap, out err) == null)
+                return false;
+            foreach (var kv in rawMap) fileKeys.Add(kv.Key);
+            if (fileKeys.Count == 0)
+            {
+                err = "备份文件中不包含任何可还原数据";
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            err = ex.Message;
+            return false;
+        }
+    }
+
     public static bool ParseBackupArchive(
         string path, out string created, out string version, out string kind, out string note,
         out Dictionary<string, byte[]> files, out string err)
@@ -218,42 +337,9 @@ public partial class MainForm
         err = "";
         try
         {
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                err = "备份文件不存在";
+            Dictionary<string, object> map;
+            if (ParseBackupEnvelope(path, out created, out version, out kind, out note, out map, out err) == null)
                 return false;
-            }
-            string raw = File.ReadAllText(path, Encoding.UTF8);
-            var root = MiniJson.Parse(raw) as Dictionary<string, object>;
-            if (root == null)
-            {
-                err = "备份文件 JSON 格式无效";
-                return false;
-            }
-            object fObj;
-            if (!root.TryGetValue("format", out fObj) || Convert.ToString(fObj) != "rxtoolbox-backup-1")
-            {
-                err = "不支持的备份文件格式";
-                return false;
-            }
-            object o;
-            if (root.TryGetValue("created", out o) && o != null) created = Convert.ToString(o);
-            if (root.TryGetValue("version", out o) && o != null) version = Convert.ToString(o);
-            if (root.TryGetValue("kind", out o) && o != null) kind = Convert.ToString(o);
-            if (root.TryGetValue("note", out o) && o != null) note = Convert.ToString(o);
-
-            object filesObj;
-            if (!root.TryGetValue("files", out filesObj))
-            {
-                err = "备份文件中缺少内容清单";
-                return false;
-            }
-            var map = filesObj as Dictionary<string, object>;
-            if (map == null)
-            {
-                err = "备份文件内容清单格式错误";
-                return false;
-            }
             foreach (var kv in map)
             {
                 string b64 = kv.Value == null ? "" : Convert.ToString(kv.Value);
@@ -1096,17 +1182,17 @@ public partial class MainForm
                     for (int i = 0; i < files.Count; i++)
                     {
                         string cr, vr, kd, nt, pErr;
-                        Dictionary<string, byte[]> bFiles;
-                        if (!ParseBackupArchive(files[i], out cr, out vr, out kd, out nt, out bFiles, out pErr))
+                        List<string> bKeys;
+                        if (!ParseBackupSummary(files[i], out cr, out vr, out kd, out nt, out bKeys, out pErr))
                             continue;
                         backupPaths.Add(files[i]);
                         var tags = new List<string>();
-                        if (bFiles.ContainsKey("custom.txt")) tags.Add("自定义文案");
-                        if (bFiles.ContainsKey("data-custom.txt")) tags.Add("指令修改");
-                        if (bFiles.ContainsKey("phrases.json")) tags.Add("底表");
-                        if (bFiles.ContainsKey("settings.ini")) tags.Add("设置");
-                        if (bFiles.ContainsKey("servers.txt")) tags.Add("收藏夹");
-                        if (bFiles.ContainsKey("crosshair.png.b64")) tags.Add("准星图");
+                        if (bKeys.Contains("custom.txt")) tags.Add("自定义文案");
+                        if (bKeys.Contains("data-custom.txt")) tags.Add("指令修改");
+                        if (bKeys.Contains("phrases.json")) tags.Add("底表");
+                        if (bKeys.Contains("settings.ini")) tags.Add("设置");
+                        if (bKeys.Contains("servers.txt")) tags.Add("收藏夹");
+                        if (bKeys.Contains("crosshair.png.b64")) tags.Add("准星图");
 
                         var item = new ListViewItem(string.IsNullOrEmpty(cr) ? Path.GetFileNameWithoutExtension(files[i]) : cr);
                         item.SubItems.Add(kd == "auto" ? "自动" : "手动");
@@ -1129,9 +1215,9 @@ public partial class MainForm
             btnFetchData.Click += delegate
             {
                 if (netBusy) return;
-                if (string.IsNullOrEmpty(updateUrl) || !IsHttpUrl(updateUrl))
+                if (string.IsNullOrEmpty(updateUrl) || !IsAllowedUpdateUrl(updateUrl))
                 {
-                    lblStatusBar.Text = "未配置有效的更新地址";
+                    lblStatusBar.Text = "未配置有效的 https:// 更新地址";
                     return;
                 }
                 netBusy = true;
@@ -1146,8 +1232,8 @@ public partial class MainForm
                         string json = HttpGetText(uUrl, 12000);
                         string dUrl = JsonField(json, "dataUrl");
                         string dSha = JsonField(json, "dataSha256");
-                        if (!IsHttpUrl(dUrl) || string.IsNullOrEmpty(dSha) || dSha.Length != 64)
-                            throw new Exception("线上清单未提供有效的数据表下载地址");
+                        if (!IsAllowedUpdateUrl(dUrl) || string.IsNullOrEmpty(dSha) || dSha.Length != 64)
+                            throw new Exception("线上清单未提供有效的 https:// 数据表下载地址");
 
                         string curSha = File.Exists(CurrentPhrasesPath) ? Sha256File(CurrentPhrasesPath) : "";
                         if (string.Equals(curSha, dSha, StringComparison.OrdinalIgnoreCase))

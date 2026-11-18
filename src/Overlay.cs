@@ -624,35 +624,36 @@ public class CountdownOverlay : Form
             if (ClientSize.Width != w || ClientSize.Height != h)
                 ClientSize = new Size(w, h);
 
-            int sw = Native.GetSystemMetrics(0);
-            int sh = Native.GetSystemMetrics(1);
+            Rectangle scr = Native.GetTargetScreenBounds();
+            int sw = scr.Width;
+            int sh = scr.Height;
             int margin = 20;
             int bx, by;
             switch (AnchorIndex)
             {
                 case 0: // 左上角
-                    bx = margin;
-                    by = margin;
+                    bx = scr.X + margin;
+                    by = scr.Y + margin;
                     break;
                 case 2: // 右上角
-                    bx = sw - w - margin;
-                    by = margin;
+                    bx = scr.X + sw - w - margin;
+                    by = scr.Y + margin;
                     break;
                 case 3: // 左下角
-                    bx = margin;
-                    by = sh - h - margin;
+                    bx = scr.X + margin;
+                    by = scr.Y + sh - h - margin;
                     break;
                 case 4: // 右下角
-                    bx = sw - w - margin;
-                    by = sh - h - margin;
+                    bx = scr.X + sw - w - margin;
+                    by = scr.Y + sh - h - margin;
                     break;
                 case 5: // 屏幕居中(准星下)
-                    bx = (sw - w) / 2;
-                    by = sh / 2 + 24;
+                    bx = scr.X + (sw - w) / 2;
+                    by = scr.Y + sh / 2 + 24;
                     break;
                 default: // 1: 顶部居中
-                    bx = (sw - w) / 2;
-                    by = margin;
+                    bx = scr.X + (sw - w) / 2;
+                    by = scr.Y + margin;
                     break;
             }
             int x = bx + OffsetX;

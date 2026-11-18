@@ -2576,15 +2576,14 @@ public partial class MainForm
 
         if (wasTyping)
         {
-            if (savedLayout != IntPtr.Zero)
+            if (savedLayout != IntPtr.Zero || savedTempLayout != IntPtr.Zero)
             {
                 IntPtr gameBack = Native.FindGameWindow();
-                if (gameBack != IntPtr.Zero)
-                {
-                    Native.RestoreLayout(gameBack, savedLayout);
+                Native.RestoreLayout(gameBack, savedLayout, savedTempLayout);
+                if (gameBack != IntPtr.Zero && savedLayout != IntPtr.Zero)
                     Native.Log("ime: restored");
-                }
                 savedLayout = IntPtr.Zero;
+                savedTempLayout = IntPtr.Zero;
             }
             RestoreClipboardAfterStop();
         }
@@ -2618,6 +2617,7 @@ public partial class MainForm
             {
                 try { Clipboard.Clear(); Native.Log("clipboard: cleared connect residue"); } catch { }
             }
+            savedClipboardText = null;
         }
         catch (Exception ex) { Native.Log("clipboard restore EX: " + ex.Message); }
     }
@@ -2649,6 +2649,7 @@ public partial class MainForm
 
         if (!BuildTargets(m, false)) return;
 
+        savedClipboardText = null;
         try
         {
             if (Clipboard.ContainsText())
@@ -2678,7 +2679,7 @@ public partial class MainForm
                 }
                 catch { }
             }
-            savedLayout = Native.SwitchToEnglish(gw);
+            savedLayout = Native.SwitchToEnglish(gw, out savedTempLayout);
             Native.Log("ime: switched to english, old=" + savedLayout.ToInt64());
         }
         else

@@ -18,6 +18,8 @@ using Windows.Storage.Streams;
 
 public partial class MainForm
 {
+    string lastFailedUploadNote = "";
+
     // ---------------- 在线版本库（Pages Functions + KV） ----------------
     string HubBase()
     {
@@ -26,37 +28,80 @@ public partial class MainForm
         return b.TrimEnd('/');
     }
 
-    string HubCall(string path, string method, string body)
+    string HubRequestOnce(string url, string method, byte[] postBytes, bool useProxy)
     {
-        string url = HubBase() + path;
-        var req = (HttpWebRequest)WebRequest.Create(url);
+        var req = CreateHttpRequest(url, 20000, "RXToolbox/" + APP_VERSION_NUM, useProxy);
         req.Method = method;
-        req.Timeout = 20000;
-        req.ReadWriteTimeout = 20000;
-        req.UserAgent = "RXToolbox/" + APP_VERSION_NUM;
         req.Headers["X-Key"] = hubKey ?? "";
-        if (body != null)
+        if (postBytes != null)
         {
             req.ContentType = "application/json; charset=utf-8";
-            byte[] data = Encoding.UTF8.GetBytes(body);
-            req.ContentLength = data.Length;
-            using (var st = req.GetRequestStream()) st.Write(data, 0, data.Length);
+            req.ContentLength = postBytes.Length;
+            using (var st = req.GetRequestStream()) st.Write(postBytes, 0, postBytes.Length);
         }
+        using (var resp = (HttpWebResponse)req.GetResponse())
+        using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+            return sr.ReadToEnd();
+    }
+
+    string HubCall(string path, string method, string body)
+    {
+        string baseUrl = HubBase();
+        if (!IsAllowedUpdateUrl(baseUrl))
+            throw new Exception("版本库地址必须以 https:// 开头");
+        string url = baseUrl + path;
+        byte[] postBytes = body != null ? Encoding.UTF8.GetBytes(body) : null;
+        string raw = null;
         try
         {
-            using (var resp = (HttpWebResponse)req.GetResponse())
-            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                return sr.ReadToEnd();
+            raw = HubRequestOnce(url, method, postBytes, true);
         }
         catch (WebException we)
         {
             if (we.Response != null)
             {
-                using (var sr = new StreamReader(we.Response.GetResponseStream(), Encoding.UTF8))
-                    return sr.ReadToEnd();
+                int code = 0;
+                try { code = (int)((HttpWebResponse)we.Response).StatusCode; } catch { }
+                string errBody = "";
+                try
+                {
+                    using (var sr = new StreamReader(we.Response.GetResponseStream(), Encoding.UTF8))
+                        errBody = sr.ReadToEnd();
+                }
+                catch { }
+                string srvErr = JsonField(errBody, "error");
+                throw new Exception("HTTP " + code + (string.IsNullOrEmpty(srvErr) ? "" : ": " + srvErr));
             }
-            throw;
+            if (we.Status == WebExceptionStatus.ProtocolError) throw;
+            try
+            {
+                raw = HubRequestOnce(url, method, postBytes, false);
+            }
+            catch (WebException we2)
+            {
+                if (we2.Response != null)
+                {
+                    int code = 0;
+                    try { code = (int)((HttpWebResponse)we2.Response).StatusCode; } catch { }
+                    string errBody = "";
+                    try
+                    {
+                        using (var sr = new StreamReader(we2.Response.GetResponseStream(), Encoding.UTF8))
+                            errBody = sr.ReadToEnd();
+                    }
+                    catch { }
+                    string srvErr = JsonField(errBody, "error");
+                    throw new Exception("HTTP " + code + (string.IsNullOrEmpty(srvErr) ? "" : ": " + srvErr));
+                }
+                throw;
+            }
         }
+        if (!string.IsNullOrEmpty(raw) && raw.IndexOf("\"ok\":false", StringComparison.Ordinal) >= 0)
+        {
+            string srvErr = JsonField(raw, "error");
+            throw new Exception(string.IsNullOrEmpty(srvErr) ? "请求被服务器拒绝" : srvErr);
+        }
+        return raw;
     }
 
     static string Sha256Text(string text)
@@ -115,12 +160,16 @@ public partial class MainForm
         return rows;
     }
 
-    static string HubErrorText(Exception ex)
+    internal static string HubErrorText(Exception ex)
     {
         string m = ex == null ? "" : ex.Message;
         string low = m.ToLowerInvariant();
         if (m.IndexOf("unauthorized", StringComparison.OrdinalIgnoreCase) >= 0)
-            return "密钥不对（服务器拒绝了）";
+            return "密钥不对或未填写（服务器拒绝了）";
+        if (m.IndexOf("forbidden", StringComparison.OrdinalIgnoreCase) >= 0)
+            return "该密钥没有权限执行此操作（只有管理员密钥可删除）";
+        if (low.Contains("rate limited") || low.Contains("daily write quota"))
+            return "操作过于频繁或已达到今日写入配额上限，请稍后再试";
         if (low.Contains("timed out") || low.Contains("超时"))
             return "连接服务器超时，检查网络或服务器地址";
         if (low.Contains("resolve") || low.Contains("解析"))
@@ -199,7 +248,7 @@ public partial class MainForm
             {
                 if (ex != null)
                 {
-                    DevSetStatus("拉取列表失败：" + ex.Message + "\r\n（检查服务器地址和密钥是否填对）");
+                    DevSetStatus("拉取列表失败：" + HubErrorText(ex) + "\r\n（检查服务器地址和密钥是否填对）");
                     return;
                 }
                 List<string[]> rows = ParseHubList(json);
@@ -237,6 +286,11 @@ public partial class MainForm
 
     void DevHubUpload()
     {
+        if (!IsAllowedUpdateUrl(HubBase()))
+        {
+            DevSetStatus("版本库地址无效：必须以 https:// 开头。");
+            return;
+        }
         if (string.IsNullOrEmpty(hubKey))
         {
             DevSetStatus("请先在“密钥”框中填写密钥后再上传。");
@@ -248,8 +302,8 @@ public partial class MainForm
             return;
         }
         // 上传者由服务器按密钥绑定，客户端不再询问
-        string note = PromptText("上传到服务器", "这次改了什么（支持多行，可留空）：", "", true);
-        if (note == null) note = "";
+        string note = PromptText("上传到服务器", "这次改了什么（支持多行，可留空）：", lastFailedUploadNote, true);
+        if (note == null) return;
         string data = BuildDataSnapshot(false, "", note);
         string body = "{\"note\":\"" + JsonEsc(note) +
                       "\",\"sha256\":\"" + Sha256Text(data) +
@@ -260,17 +314,20 @@ public partial class MainForm
             {
                 if (ex != null)
                 {
-                    DevSetStatus("上传失败：" + HubErrorText(ex));
+                    lastFailedUploadNote = note;
+                    DevSetStatus("上传失败（刚才输入的说明已暂存，下次打开会自动填回）：" + HubErrorText(ex));
                     return;
                 }
                 if (resp != null && resp.IndexOf("\"ok\":true", StringComparison.Ordinal) >= 0)
                 {
+                    lastFailedUploadNote = "";
                     string who = JsonField(resp, "author");
                     DevSetStatus("已上传（上传者：" + (who.Length > 0 ? who : "未识别") + "）：" + JsonField(resp, "id") + "\r\n由于云端缓存，列表通常在十余秒后刷新显示。");
                 }
                 else
                 {
-                    DevSetStatus("上传失败：" + resp);
+                    lastFailedUploadNote = note;
+                    DevSetStatus("上传失败（刚才输入的说明已暂存）：" + resp);
                 }
             });
     }
@@ -307,14 +364,14 @@ public partial class MainForm
                 }
                 var sb = new StringBuilder();
                 foreach (var kv in parsed) sb.Append("· ").Append(kv.Key).Append("：").Append(kv.Value.Count).Append(" 条\r\n");
-                if (MessageBox.Show(this, meta + "\r\n" + sb + "\r\n确定将其应用为本机数据吗？（会覆盖 data-custom.txt）",
+                if (MessageBox.Show(this, meta + "\r\n" + sb + "\r\n确定将其应用为本机数据吗？（会先自动备份，仅保存与官方基准有差异的页签）",
                     "下载并应用", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 {
                     DevSetStatus("已取消应用版本 " + id + "。");
                     return;
                 }
-                ApplyDataOverrides(parsed);
-                DevSetStatus("已应用版本 " + id + "，已即时生效。");
+                ApplyDataOverrides(parsed, "应用线上版本(" + id + ")前自动备份");
+                DevSetStatus("已应用版本 " + id + "（原数据已自动备份），已即时生效。");
             });
     }
 
@@ -424,7 +481,27 @@ public partial class MainForm
         return sb.ToString();
     }
 
-    static Dictionary<string, List<string>> ParseDataSnapshot(string text, out string meta)
+    static string UnescapeDevCell(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var sb = new StringBuilder(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '\\' && i + 1 < s.Length)
+            {
+                char n = s[i + 1];
+                if (n == 'n') { sb.Append("\r\n"); i++; continue; }
+                if (n == 'r') { i++; continue; }
+                if (n == 't') { sb.Append('\t'); i++; continue; }
+                if (n == '\\') { sb.Append('\\'); i++; continue; }
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
+    internal static Dictionary<string, List<string>> ParseDataSnapshot(string text, out string meta)
     {
         meta = "";
         var map = new Dictionary<string, List<string>>();
@@ -441,7 +518,7 @@ public partial class MainForm
                 if (line.StartsWith("# 提交人", StringComparison.Ordinal) ||
                     line.StartsWith("# 说明", StringComparison.Ordinal) ||
                     line.StartsWith("# 版本", StringComparison.Ordinal))
-                    meta += line.Substring(1).Trim() + "　";
+                    meta += UnescapeDevCell(line.Substring(1).Trim()) + "　";
                 continue;
             }
             if (line[0] == '【')
@@ -455,11 +532,11 @@ public partial class MainForm
             if (cur == null) continue;
             if (!headerSkipped && line.StartsWith("标题", StringComparison.Ordinal)) { headerSkipped = true; continue; }
             string[] cells = line.Split('\t');
-            string title = cells.Length > 0 ? cells[0] : "";
-            string main = cells.Length > 1 ? cells[1] : "";
-            string alt = cells.Length > 2 ? cells[2] : "";
-            string ulx = cells.Length > 3 ? cells[3] : "";
-            string note = cells.Length > 4 ? cells[4] : "";
+            string title = cells.Length > 0 ? UnescapeDevCell(cells[0]) : "";
+            string main = cells.Length > 1 ? UnescapeDevCell(cells[1]) : "";
+            string alt = cells.Length > 2 ? UnescapeDevCell(cells[2]) : "";
+            string ulx = cells.Length > 3 ? UnescapeDevCell(cells[3]) : "";
+            string note = cells.Length > 4 ? UnescapeDevCell(cells[4]) : "";
             if (title.Length == 0) continue;
             map[cur].Add(DevJoinItem(title, main, alt, ulx, note));
         }
@@ -539,12 +616,12 @@ public partial class MainForm
 
             string msg = (meta.Length > 0 ? meta + "\r\n\r\n" : "") + report +
                 "\r\n合计：新增 " + totalNew + "，修改 " + totalChg + "，删除 " + totalDel + "\r\n\r\n" +
-                "应用后将覆盖 data-custom.txt 并立即刷新对应页面，是否继续？";
+                "应用后将自动先创建一个本地备份，并仅保存与官方基准有差异的页签，是否继续？";
             if (MessageBox.Show(this, msg, "导入预览", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
                 return;
 
-            ApplyDataOverrides(parsed);
-            DevSetStatus(report.ToString() + "\r\n已写入 data-custom.txt，并已即时刷新页面。");
+            ApplyDataOverrides(parsed, "导入 .rxdata 数据前自动备份");
+            DevSetStatus(report.ToString() + "\r\n已保存差异页签并即时刷新页面（原数据已自动备份）。");
         }
         catch (Exception ex)
         {
@@ -566,18 +643,12 @@ public partial class MainForm
     }
 
 
-    void ApplyDataOverrides(Dictionary<string, List<string>> tables)
+    void ApplyDataOverrides(Dictionary<string, List<string>> tables, string autoBakReason)
     {
-        var sb = new StringBuilder();
-        sb.Append("# 由「开发者工具 → 导入数据」写入\r\n");
-        sb.Append("# 时间 ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm")).Append("\r\n");
-        foreach (var kv in tables)
-        {
-            sb.Append("###").Append(kv.Key).Append("\r\n");
-            foreach (string it in kv.Value) sb.Append(EscapeItem(it)).Append("\r\n");
-        }
-        AtomicWriteText(dataOverridePath, sb.ToString());
+        string bakPath;
+        CreateBackupSnapshot("auto", string.IsNullOrEmpty(autoBakReason) ? "覆盖本地数据前自动备份" : autoBakReason, out bakPath);
         HotApplyOverrides(tables);   // 立刻生效，不用重启
+        SaveDataOverrides();         // 只写与内置基准有差异的页签，避免未改页被永久锁死
     }
 
     TabPage BuildDevPage()

@@ -34,6 +34,11 @@ public partial class MainForm
                 DumpControls(sb, pg, "  ", 0);
             }
             string dir = Path.GetDirectoryName(Application.ExecutablePath);
+            if (!CanWriteDir(dir))
+            {
+                dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RXToolbox");
+                Directory.CreateDirectory(dir);
+            }
             File.WriteAllText(Path.Combine(dir, "dump-ui.log"), sb.ToString(), new UTF8Encoding(true));
         }
         catch { }
@@ -144,6 +149,7 @@ public partial class MainForm
         chk("目标名：已带引号不重复加", ApplyTargetName("!strip ^", "\"A B\"") == "!strip \"A B\"", "");
         chk("目标名：留空不动", ApplyTargetName("!strip ^", "  ") == "!strip ^", "");
         chk("目标名：没有 ^ 不动", ApplyTargetName("stopsound", "X") == "stopsound", "");
+        chk("目标名：多个 ^ 全部替换", ApplyTargetName("!cmd ^ ^", "X") == "!cmd X X", ApplyTargetName("!cmd ^ ^", "X"));
 
         // ---- 5.5 条目编辑器（PromptItem 走 DevSplitItem/DevJoinItem）----
                 string editRaw = "带注解条目" + "\u0001" + "!cmd ^" + "\u0002" + "\u0003" + "这是注解";
@@ -152,6 +158,12 @@ public partial class MainForm
                 chk("编辑器：读得到注解", en == "这是注解", "得到 " + Esc0(en));
                 chk("编辑器：命令没被注解污染", em == "!cmd ^", "得到 " + Esc0(em));
                 chk("编辑器：原样存回", DevJoinItem(et, em, ea, eu, en) == editRaw, "不一致");
+                string dirtyJoined = DevJoinItem("标\u0003题", "指\u0004令", "备\u0001用", "ulx\u0002x", "注\u0003解");
+                string ct0, cm0, ca0, cu0, cn0;
+                DevSplitItem(dirtyJoined, out ct0, out cm0, out ca0, out cu0, out cn0);
+                chk("CleanCtrl：过滤 \\u0001~\\u0004 防串列",
+                    ct0 == "标 题" && cm0 == "指 令" && ca0 == "备 用" && cu0 == "ulx x" && cn0 == "注 解",
+                    Esc0(dirtyJoined));
 
                 // ---- 5.6 data-custom.txt 转义往返 ----
                 chk("持久化转义往返", UnescapeItem(EscapeItem(editRaw)) == editRaw, "不一致");
@@ -208,8 +220,28 @@ public partial class MainForm
             chk("更新下载 + SHA256 校验通过", DownloadAndVerify(fileUrl, goodSha, dest) && File.Exists(dest), "");
             chk("更新下载：哈希不对时拒绝", !DownloadAndVerify(fileUrl, new string('0', 64), Path.Combine(tmpDir, "bad.bin")), "");
             chk("更新下载：空哈希时拒绝", !DownloadAndVerify(fileUrl, "", Path.Combine(tmpDir, "emptysha.bin")), "");
+            chk("更新下载：拒绝非本机 http://，允许 https:// 与本机回环端口",
+                !IsHttpsUrl("http://rx-toolbox.pages.dev/a.exe")
+                && IsHttpsUrl("https://rx-toolbox.pages.dev/a.exe")
+                && !IsAllowedUpdateUrl("http://example.com/a.exe")
+                && !IsAllowedUpdateUrl("http://192.168.1.10/a.exe")
+                && IsAllowedUpdateUrl("http://127.0.0.1:18080/version.json")
+                && IsAllowedUpdateUrl("http://localhost:18080/a.exe")
+                && !DownloadAndVerify("http://example.com/a.exe", goodSha, Path.Combine(tmpDir, "http.bin")), "");
 #if ADMIN_EDITION
             chk("MiniJson：损坏输入不死循环", MiniJson.Parse("{bad:123,@}") != null, "");
+            chk("MiniJson：超深嵌套安全拦截不栈溢出",
+                Data.ParseTables(new string('[', 120) + new string(']', 120)) == null, "");
+            chk("版本库错误提示：识别 401 unauthorized",
+                HubErrorText(new Exception("HTTP 401: unauthorized")).IndexOf("密钥不对", StringComparison.Ordinal) >= 0, "");
+            string mlSnap = "【指令表】\r\n标题\t主指令\t备用\tulx\t备注\r\n" +
+                            "多行项\t" + DevCell("say hi\nsay\tbye") + "\t\t\t" + DevCell("带说明") + "\r\n";
+            string mlMeta;
+            var mlParsed = ParseDataSnapshot(mlSnap, out mlMeta);
+            string mlT = "", mlM = "", mlA = "", mlU = "", mlN = "";
+            if (mlParsed.ContainsKey("指令表") && mlParsed["指令表"].Count == 1)
+                DevSplitItem(mlParsed["指令表"][0], out mlT, out mlM, out mlA, out mlU, out mlN);
+            chk("快照多行与制表符无损往返", mlM.Contains("\n") && mlM.Contains("say\tbye") && mlN == "带说明", Esc0(mlM));
             var hubRows = ParseHubList("{\"ok\":true,\"items\":[{\"id\":\"2026-ab\",\"ts\":\"2026-11-16T12:00:00Z\",\"author\":\"王月\",\"note\":\"含{花括号}备注\",\"size\":2048}]}");
             chk("版本库列表：备注含花括号不丢失", hubRows.Count == 1 && hubRows[0][2] == "含{花括号}备注", "");
             chk("ulx 名字映射（forcespawn → force_spawn）",
@@ -365,11 +397,11 @@ public partial class MainForm
             string strippedWarn = StripWarnChangelogLine("!!【重要提醒】测试", out sawWarnLine);
 #if ADMIN_EDITION
             chk("管理版窗口标题后缀标识", APP_EDITION_SUFFIX == "（管理版）", APP_EDITION_SUFFIX);
-            chk("更新日志 1.8.2 与重要提示高亮标记格式",
-                CHANGELOG.Length > 2
-                && CHANGELOG[0].StartsWith("1.8.2|", StringComparison.Ordinal)
-                && CHANGELOG[2].StartsWith("1.8.0|", StringComparison.Ordinal)
-                && CHANGELOG[2].Contains("Rx工具箱.exe")
+            chk("更新日志首条与当前版本一致且高亮标记格式正确",
+                CHANGELOG.Length > 3
+                && CHANGELOG[0].StartsWith(APP_VERSION_NUM + "|", StringComparison.Ordinal)
+                && CHANGELOG[3].StartsWith("1.8.0|", StringComparison.Ordinal)
+                && CHANGELOG[3].Contains("Rx工具箱.exe")
                 && sawWarnLine && strippedWarn.StartsWith("【重要提醒】", StringComparison.Ordinal), "");
 #else
             chk("公开版更新日志、无管理后缀与独立更新源配置检查",
@@ -492,6 +524,15 @@ public partial class MainForm
                 && bChg.Count == 1 && bChg[0] == "甲"
                 && bRem.Count == 1 && bRem[0] == "旧项", "");
 
+            int secAdd, secChg, secDel;
+            ComputeTabDiff(
+                new string[] { "分组A", DevJoinItem("L85", "!g a1", "", "", ""), "分组B", DevJoinItem("L85", "!g b1", "", "", "") },
+                new string[] { "分组A", "分组B", DevJoinItem("L85", "!g b1", "", "", "") },
+                out secAdd, out secChg, out secDel, null, null, null);
+            chk("差异对比：按所属分类隔离同名项（删除分组A不影响分组B）",
+                secAdd == 0 && secChg == 0 && secDel == 1,
+                string.Format("add={0} chg={1} del={2}", secAdd, secChg, secDel));
+
             chk("页签一致性判断（未改动表不写入 data-custom）",
                 TabListEquals(new List<string>(new string[] { "x", "y" }), new string[] { "x", "y" })
                 && !TabListEquals(new List<string>(new string[] { "x", "z" }), new string[] { "x", "y" }), "");
@@ -505,7 +546,7 @@ public partial class MainForm
             File.WriteAllText(Path.Combine(bakTestDir, "custom.txt"), origCustom, new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(bakTestDir, "phrases.json"), origPhrases, new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(bakTestDir, "data-custom.txt"), origOverride, new UTF8Encoding(false));
-            File.WriteAllText(Path.Combine(bakTestDir, "settings.ini"), "ThemeMode=1\r\n", new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(bakTestDir, "settings.ini"), "ThemeMode=1\r\nHubKey=secret-test-key\r\n", new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(bakTestDir, "servers.txt"), "1.2.3.4:27015|s1|srv\r\n", new UTF8Encoding(false));
             File.WriteAllBytes(Path.Combine(bakTestDir, "crosshair.png"), new byte[] { 137, 80, 78, 71, 1, 2, 3, 4 });
 
@@ -513,14 +554,19 @@ public partial class MainForm
             string bakErr;
             bool bakCreated = CreateBackupArchiveToFile(bakPkg, bakTestDir, bakTestDir, "", "manual", "测试备注{1}", out bakErr);
             string pCr = "", pVr = "", pKd = "", pNt = "", pErr = "";
+            List<string> sumKeys = null;
+            bool sumOk = bakCreated && ParseBackupSummary(bakPkg, out pCr, out pVr, out pKd, out pNt, out sumKeys, out pErr);
+            chk("备份包轻量摘要读取（不解正文）", sumOk && sumKeys != null && sumKeys.Contains("settings.ini") && sumKeys.Contains("crosshair.png.b64"), pErr);
             Dictionary<string, byte[]> pFiles = null;
             bool bakParsed = bakCreated && ParseBackupArchive(bakPkg, out pCr, out pVr, out pKd, out pNt, out pFiles, out pErr);
-            chk("备份包 .rxbak 创建与无损解析（含分隔符与图片字节）",
+            string bakIni = (pFiles != null && pFiles.ContainsKey("settings.ini")) ? Encoding.UTF8.GetString(pFiles["settings.ini"]) : "";
+            chk("备份包 .rxbak 创建、脱敏与无损解析（剔除 HubKey）",
                 bakParsed && pFiles != null
                 && pKd == "manual" && pNt == "测试备注{1}"
                 && Encoding.UTF8.GetString(pFiles["custom.txt"]) == origCustom
                 && pFiles.ContainsKey("crosshair.png.b64")
-                && pFiles["crosshair.png.b64"].Length == 8, bakErr + " " + pErr);
+                && pFiles["crosshair.png.b64"].Length == 8
+                && bakIni.Contains("ThemeMode=1") && !bakIni.Contains("secret-test-key"), bakErr + " " + pErr);
 
             string badBak = Path.Combine(bakSubDir, "bad.rxbak");
             File.WriteAllText(badBak, "{\"format\":\"wrong\"}", Encoding.UTF8);
@@ -577,6 +623,11 @@ public partial class MainForm
         try
         {
             string dir = Path.GetDirectoryName(Application.ExecutablePath);
+            if (!CanWriteDir(dir))
+            {
+                dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RXToolbox");
+                Directory.CreateDirectory(dir);
+            }
             File.WriteAllText(Path.Combine(dir, "selftest.log"), sb.ToString(), new UTF8Encoding(true));
         }
         catch { }

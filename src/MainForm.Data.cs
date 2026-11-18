@@ -195,14 +195,18 @@ public partial class MainForm
         if (tabIndex < 0 || tabIndex >= dataTabLists.Length) return;
         var list = dataTabLists[tabIndex];
         string label = dataTabLabels[tabIndex];
+        string[] origSnapshot = list.ToArray();
+        var work = new List<string>(origSnapshot);
+        Func<bool> isDirty = delegate { return !TabListEquals(work, origSnapshot); };
+        DialogResult dr = DialogResult.Cancel;
 
         using (var dlg = new Form())
         {
-            dlg.Text = label + " · 编辑条目（共 " + list.Count + " 条）";
+            dlg.Text = label + " · 编辑条目（共 " + work.Count + " 条）";
             dlg.StartPosition = FormStartPosition.CenterParent;
             dlg.FormBorderStyle = FormBorderStyle.Sizable;
-            dlg.MinimumSize = new Size(860, 460);
-            dlg.ClientSize = new Size(1000, 640);
+            dlg.MinimumSize = new Size(940, 480);
+            dlg.ClientSize = new Size(1020, 640);
             dlg.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
 
             var grid = new DataGridView();
@@ -250,16 +254,16 @@ public partial class MainForm
             colCmd.MinimumWidth = 200;
             grid.Columns.Add(colCmd);
 
-            bool[] headFlags = new bool[list.Count];
+            bool[] headFlags = new bool[work.Count];
 
             Action fill = delegate
             {
-                if (headFlags.Length < list.Count) headFlags = new bool[list.Count];
+                if (headFlags.Length < work.Count) headFlags = new bool[work.Count];
                 for (int z = 0; z < headFlags.Length; z++) headFlags[z] = false;
                 grid.Rows.Clear();
-                for (int i = 0; i < list.Count; i++)
+                for (int i = 0; i < work.Count; i++)
                 {
-                    string raw = list[i] ?? "";
+                    string raw = work[i] ?? "";
                     string t = raw, b = "", a = "";
                     string uu = "", uun = "";
                     DevSplitItem(raw, out t, out b, out a, out uu, out uun);
@@ -271,13 +275,14 @@ public partial class MainForm
                     int ri = grid.Rows.Add("≡", t, isHeader ? "" : cmdShow);
                     if (ri < headFlags.Length) headFlags[ri] = isHeader;
                 }
+                dlg.Text = label + " · 编辑条目（共 " + work.Count + " 条）";
             };
             fill();
 
             Action<int> refreshRow = delegate(int i)
             {
-                if (i < 0 || i >= grid.Rows.Count || i >= list.Count) return;
-                string raw = list[i] ?? "";
+                if (i < 0 || i >= grid.Rows.Count || i >= work.Count) return;
+                string raw = work[i] ?? "";
                 string t = raw, b = "", a = "";
                 string uu2 = "", uu2n = "";
                 DevSplitItem(raw, out t, out b, out a, out uu2, out uu2n);
@@ -315,7 +320,7 @@ public partial class MainForm
                 string raw = "";
                 if (PromptItem("添加条目 · " + label, ref raw) && raw.Trim().Length > 0)
                 {
-                    list.Add(raw);
+                    work.Add(raw);
                     fill();
                     grid.ClearSelection();
                     if (grid.Rows.Count > 0) grid.Rows[grid.Rows.Count - 1].Selected = true;
@@ -329,7 +334,7 @@ public partial class MainForm
                 string raw = "";
                 if (PromptItem("添加分类标题 · " + label, ref raw) && raw.Trim().Length > 0)
                 {
-                    list.Add(raw);
+                    work.Add(raw);
                     fill();
                     grid.ClearSelection();
                     if (grid.Rows.Count > 0) grid.Rows[grid.Rows.Count - 1].Selected = true;
@@ -342,10 +347,10 @@ public partial class MainForm
             {
                 int i = selIndex();
                 if (i < 0) return;
-                string raw = list[i];
+                string raw = work[i];
                 if (PromptItem("修改条目 · " + label, ref raw) && raw.Trim().Length > 0)
                 {
-                    list[i] = raw;
+                    work[i] = raw;
                     fill();
                     grid.ClearSelection();
                     if (i < grid.Rows.Count) grid.Rows[i].Selected = true;
@@ -358,7 +363,7 @@ public partial class MainForm
             {
                 int i = selIndex();
                 if (i < 0) return;
-                list.RemoveAt(i);
+                work.RemoveAt(i);
                 fill();
                 if (grid.Rows.Count > 0)
                 {
@@ -373,7 +378,7 @@ public partial class MainForm
             {
                 int i = selIndex();
                 if (i <= 0) return;
-                string a = list[i - 1]; list[i - 1] = list[i]; list[i] = a;
+                string a = work[i - 1]; work[i - 1] = work[i]; work[i] = a;
                 refreshRow(i - 1);
                 refreshRow(i);
                 grid.ClearSelection();
@@ -386,8 +391,8 @@ public partial class MainForm
             bDown.Click += delegate
             {
                 int i = selIndex();
-                if (i < 0 || i >= list.Count - 1) return;
-                string a = list[i + 1]; list[i + 1] = list[i]; list[i] = a;
+                if (i < 0 || i >= work.Count - 1) return;
+                string a = work[i + 1]; work[i + 1] = work[i]; work[i] = a;
                 refreshRow(i);
                 refreshRow(i + 1);
                 grid.ClearSelection();
@@ -400,60 +405,58 @@ public partial class MainForm
             bReset.ForeColor = Color.FromArgb(160, 60, 60);
             bReset.Click += delegate
             {
-                if (MessageBox.Show(dlg, "清空「" + label + "」的本机修改，恢复成当前基准数据？\n（仅还原这一页，立即生效）",
+                if (MessageBox.Show(dlg, "将「" + label + "」的工作副本重置为当前基准数据？\n（点「保存并关闭」后生效，若后悔可点「取消」）",
                         "恢复内置", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
                 int baseIdx = Array.IndexOf(dataTabLabels, label);
                 if (baseIdx >= 0 && baseIdx < dataTabBase.Length && dataTabBase[baseIdx] != null)
                 {
-                    list.Clear();
-                    list.AddRange(dataTabBase[baseIdx]);
-                    dataTabLists[baseIdx] = list;
+                    work.Clear();
+                    work.AddRange(dataTabBase[baseIdx]);
                     fill();
-                    SaveDataOverrides();
-                    RebuildDataPage(baseIdx, false);
                 }
-                else
-                {
-                    var map = LoadDataOverrides();
-                    map.Remove(label);
-                    var sb = new StringBuilder();
-                    foreach (var kv in map)
-                    {
-                        sb.Append("###").Append(kv.Key).Append("\r\n");
-                        for (int k = 0; k < kv.Value.Count; k++)
-                            sb.Append(EscapeItem(kv.Value[k])).Append("\r\n");
-                    }
-                    AtomicWriteText(dataOverridePath, sb.ToString());
-                }
-                MessageBox.Show(dlg, "「" + label + "」已恢复为当前基准数据并即时刷新。", "提示");
             };
             bar.Controls.Add(bReset);
 
             var bBackupMgr = new Button(); bBackupMgr.Text = "备份与更新…"; bBackupMgr.SetBounds(630, 10, 108, 32);
             bBackupMgr.Click += delegate
             {
-                SaveDataOverrides();
+                if (isDirty())
+                {
+                    if (MessageBox.Show(dlg, "打开备份管理前，是否先保存当前编辑中的修改？", "未保存修改",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                    {
+                        dataTabLists[tabIndex] = new List<string>(work);
+                        origSnapshot = work.ToArray();
+                        SaveDataOverrides();
+                        RebuildDataPage(tabIndex, false);
+                    }
+                }
                 ShowDataBackupManager(dlg);
                 if (tabIndex < dataTabLists.Length && dataTabLists[tabIndex] != null)
                 {
-                    if (!object.ReferenceEquals(list, dataTabLists[tabIndex]))
-                    {
-                        list.Clear();
-                        list.AddRange(dataTabLists[tabIndex]);
-                        dataTabLists[tabIndex] = list;
-                    }
+                    origSnapshot = dataTabLists[tabIndex].ToArray();
+                    work.Clear();
+                    work.AddRange(origSnapshot);
                     fill();
                 }
             };
             bar.Controls.Add(bBackupMgr);
 
-            var bClose = new Button();
-            bClose.Text = "完成";
-            bClose.DialogResult = DialogResult.OK;
-            bClose.SetBounds(700, 10, 96, 32);
-            bClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            bar.Controls.Add(bClose);
-            dlg.AcceptButton = bClose;
+            var bSave = new Button();
+            bSave.Text = "保存并关闭";
+            bSave.DialogResult = DialogResult.OK;
+            bSave.SetBounds(748, 10, 106, 32);
+            bSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            bar.Controls.Add(bSave);
+
+            var bCancel = new Button();
+            bCancel.Text = "取消";
+            bCancel.DialogResult = DialogResult.Cancel;
+            bCancel.SetBounds(862, 10, 74, 32);
+            bCancel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            bar.Controls.Add(bCancel);
+            dlg.AcceptButton = bSave;
+            dlg.CancelButton = bCancel;
 
             Font boldCellFont = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
             grid.CellPainting += delegate(object s, DataGridViewCellPaintingEventArgs e)
@@ -507,11 +510,11 @@ public partial class MainForm
                 if (dragFrom < 0) return;
                 DataGridView.HitTestInfo hit = grid.HitTest(e.X, e.Y);
                 int to = (hit.Type == DataGridViewHitTestType.Cell) ? hit.RowIndex : -1;
-                if (to >= 0 && to != dragFrom && dragFrom < list.Count && to < list.Count)
+                if (to >= 0 && to != dragFrom && dragFrom < work.Count && to < work.Count)
                 {
-                    string item = list[dragFrom];
-                    list.RemoveAt(dragFrom);
-                    list.Insert(to, item);
+                    string item = work[dragFrom];
+                    work.RemoveAt(dragFrom);
+                    work.Insert(to, item);
                     fill();
                     grid.ClearSelection();
                     if (to < grid.Rows.Count)
@@ -532,20 +535,41 @@ public partial class MainForm
                 else if (e.KeyCode == Keys.Enter) { bEdit.PerformClick(); e.Handled = true; }
             };
 
+            Action layoutBottomBar = delegate
+            {
+                int bw = bar.ClientSize.Width;
+                bCancel.Left = bw - bCancel.Width - 8;
+                bSave.Left = bCancel.Left - bSave.Width - 8;
+            };
             dlg.Shown += delegate
             {
                 layoutCols();
-                bClose.Left = bar.ClientSize.Width - bClose.Width - 8;
+                layoutBottomBar();
             };
-            bar.Resize += delegate { bClose.Left = bar.ClientSize.Width - bClose.Width - 8; };
+            bar.Resize += delegate { layoutBottomBar(); };
+            dlg.FormClosing += delegate(object s, FormClosingEventArgs ce)
+            {
+                if (ce.CloseReason == CloseReason.UserClosing && dlg.DialogResult != DialogResult.OK && isDirty())
+                {
+                    if (MessageBox.Show(dlg, "当前有尚未保存的修改，确定放弃修改并关闭吗？", "放弃修改",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    {
+                        ce.Cancel = true;
+                    }
+                }
+            };
             ThemeDialog(dlg);
 
-            dlg.ShowDialog(this);
+            dr = dlg.ShowDialog(this);
         }
 
-        SaveDataOverrides();
-        RebuildDataPage(tabIndex);
-        Native.Log("data edit: " + label + " -> " + list.Count + " 条");
+        if (dr == DialogResult.OK && isDirty())
+        {
+            dataTabLists[tabIndex] = work;
+            SaveDataOverrides();
+            RebuildDataPage(tabIndex);
+            Native.Log("data edit: " + label + " -> " + work.Count + " 条");
+        }
     }
 
     void RebuildDataPage(int index)
@@ -562,6 +586,7 @@ public partial class MainForm
             int prevSel = tabs.SelectedIndex;
             var old = tabs.TabPages[tabIdx];
             tabs.TabPages.Remove(old);
+            ForgetOrigColors(old);
             old.Dispose();
             tabs.TabPages.Insert(tabIdx, BuildTextPage(dataTabLabels[index], dataTabLists[index].ToArray(), index));
             ThemeControlTree(tabs.TabPages[tabIdx]);
@@ -587,42 +612,8 @@ public partial class MainForm
         int cmdCount = 0;
         for (int i = 0; i < total; i++)
         {
-            string raw = items[i] ?? "";
-            int sep = raw.IndexOf('\u0001');
-            string t = sep > 0 ? raw.Substring(0, sep) : raw;
-            string rest = sep > 0 ? raw.Substring(sep + 1) : "";
-            string b = rest, a = "";
-            int sep2 = rest.IndexOf('\u0002');
-            string nt = "";
-            if (sep2 >= 0)
-            {
-                b = rest.Substring(0, sep2);
-                a = rest.Substring(sep2 + 1);
-            }
-            string ux = "";
-            // 顺序很重要：注解在最末尾，先剥注解再剥第三种写法，否则注解会被并进指令
-            int sep3 = a.IndexOf('\u0003');   // \u0003 之后是注解（小字灰色，例如"属于哪个角色"）
-            if (sep3 >= 0)
-            {
-                nt = a.Substring(sep3 + 1);
-                a = a.Substring(0, sep3);
-            }
-            else if (sep2 < 0)
-            {
-                // 兜底：文件里没有 \u0002 占位时，注解直接跟在指令后面
-                int sep3b = b.IndexOf('\u0003');
-                if (sep3b >= 0)
-                {
-                    nt = b.Substring(sep3b + 1);
-                    b = b.Substring(0, sep3b);
-                }
-            }
-            int sep4 = a.IndexOf('\u0004');   // \u0004 之后是第三种写法（控制台 ulx / 备用代码）
-            if (sep4 >= 0)
-            {
-                ux = a.Substring(sep4 + 1);
-                a = a.Substring(0, sep4);
-            }
+            string t, b, a, ux, nt;
+            DevSplitItem(items[i] ?? "", out t, out b, out a, out ux, out nt);
             ulxs[i] = ux;
             titles[i] = t;
             bodies[i] = b;
@@ -1312,8 +1303,7 @@ public partial class MainForm
         if (raw.IndexOf('^') < 0) return raw;
         if (idTxt.IndexOf(' ') >= 0 && !(idTxt.StartsWith("\"") && idTxt.EndsWith("\"")))
             idTxt = "\"" + idTxt + "\"";
-        int at = raw.IndexOf('^');
-        return raw.Substring(0, at) + idTxt + raw.Substring(at + 1);
+        return raw.Replace("^", idTxt);
     }
 
     // ! 开头的命令默认「ulx + 名字」，但 ULX 里这几个是下划线写法：
@@ -1465,12 +1455,15 @@ public partial class MainForm
     }
 
     // 极简 JSON 解析：只支持本程序需要的子集（对象/数组/字符串/数字/真假/null）
-    static class MiniJson
+    internal static class MiniJson
     {
+        const int MAX_DEPTH = 64;
+
         public static object Parse(string text)
         {
+            if (string.IsNullOrEmpty(text)) return null;
             int i = 0;
-            object v = ParseValue(text, ref i);
+            object v = ParseValue(text, ref i, 0);
             return v;
         }
 
@@ -1484,13 +1477,14 @@ public partial class MainForm
             }
         }
 
-        static object ParseValue(string s, ref int i)
+        static object ParseValue(string s, ref int i, int depth)
         {
+            if (depth > MAX_DEPTH) throw new FormatException("JSON nesting depth exceeded");
             SkipWs(s, ref i);
             if (i >= s.Length) return null;
             char c = s[i];
-            if (c == '{') return ParseObject(s, ref i);
-            if (c == '[') return ParseArray(s, ref i);
+            if (c == '{') return ParseObject(s, ref i, depth + 1);
+            if (c == '[') return ParseArray(s, ref i, depth + 1);
             if (c == '"') return ParseString(s, ref i);
             if (c == 't' && i + 4 <= s.Length) { i += 4; return true; }
             if (c == 'f' && i + 5 <= s.Length) { i += 5; return false; }
@@ -1498,8 +1492,9 @@ public partial class MainForm
             return ParseNumber(s, ref i);
         }
 
-        static Dictionary<string, object> ParseObject(string s, ref int i)
+        static Dictionary<string, object> ParseObject(string s, ref int i, int depth)
         {
+            if (depth > MAX_DEPTH) throw new FormatException("JSON nesting depth exceeded");
             var d = new Dictionary<string, object>();
             i++;                     // {
             while (true)
@@ -1512,7 +1507,7 @@ public partial class MainForm
                 string k = ParseString(s, ref i);
                 SkipWs(s, ref i);
                 if (i < s.Length && s[i] == ':') i++;
-                object v = ParseValue(s, ref i);
+                object v = ParseValue(s, ref i, depth);
                 if (k != null) d[k] = v;
                 SkipWs(s, ref i);
                 if (i < s.Length && s[i] == '}') { i++; break; }
@@ -1521,8 +1516,9 @@ public partial class MainForm
             return d;
         }
 
-        static List<object> ParseArray(string s, ref int i)
+        static List<object> ParseArray(string s, ref int i, int depth)
         {
+            if (depth > MAX_DEPTH) throw new FormatException("JSON nesting depth exceeded");
             var list = new List<object>();
             i++;                     // [
             while (true)
@@ -1532,7 +1528,7 @@ public partial class MainForm
                 if (i >= s.Length) break;
                 if (s[i] == ']') { i++; break; }
                 if (s[i] == ',') { i++; continue; }
-                list.Add(ParseValue(s, ref i));
+                list.Add(ParseValue(s, ref i, depth));
                 SkipWs(s, ref i);
                 if (i < s.Length && s[i] == ']') { i++; break; }
                 if (i <= stepStart) { i++; break; }
@@ -1591,22 +1587,32 @@ public partial class MainForm
 
     public static string DevJoinItem(string title, string main, string alt, string ulx, string note)
     {
-        string s = title + "\u0001" + main;
-        if (!string.IsNullOrEmpty(alt) || !string.IsNullOrEmpty(ulx)) s += "\u0002" + alt;
-        else if (!string.IsNullOrEmpty(note)) s += "\u0002";   // 只有注解时也要占位，否则注解会并进指令
-        if (!string.IsNullOrEmpty(ulx)) s += "\u0004" + ulx;
-        if (!string.IsNullOrEmpty(note)) s += "\u0003" + note;
+        string ct = CleanCtrl(title, true);
+        string cm = CleanCtrl(main, false);
+        string ca = CleanCtrl(alt, false);
+        string cu = CleanCtrl(ulx, true);
+        string cn = CleanCtrl(note, true);
+        string s = ct + "\u0001" + cm;
+        if (!string.IsNullOrEmpty(ca) || !string.IsNullOrEmpty(cu)) s += "\u0002" + ca;
+        else if (!string.IsNullOrEmpty(cn)) s += "\u0002";   // 只有注解时也要占位，否则注解会并进指令
+        if (!string.IsNullOrEmpty(cu)) s += "\u0004" + cu;
+        if (!string.IsNullOrEmpty(cn)) s += "\u0003" + cn;
         return s;
     }
 
-    static string DevCell(string s)
+    internal static string DevCell(string s)
     {
         if (string.IsNullOrEmpty(s)) return "";
         var sb = new StringBuilder(s.Length);
         for (int i = 0; i < s.Length; i++)
         {
             char c = s[i];
-            sb.Append(c < ' ' ? ' ' : c);
+            if (c == '\\') sb.Append("\\\\");
+            else if (c == '\r') continue;
+            else if (c == '\n') sb.Append("\\n");
+            else if (c == '\t') sb.Append("\\t");
+            else if (c < ' ') sb.Append(' ');
+            else sb.Append(c);
         }
         return sb.ToString().Trim();
     }

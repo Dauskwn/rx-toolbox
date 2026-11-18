@@ -59,12 +59,23 @@ public partial class MainForm
         catch (Exception ex) { Native.Log("custom load: " + ex.Message); }
     }
 
-    static string CleanCtrl(string s, bool singleLine)
+    internal static string CleanCtrl(string s, bool singleLine)
     {
         if (string.IsNullOrEmpty(s)) return "";
-        string res = s.Replace('\u0001', ' ').Replace('\u0002', ' ');
-        if (singleLine) res = res.Replace('\r', ' ').Replace('\n', ' ');
-        return res;
+        var sb = new StringBuilder(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '\u0001' || c == '\u0002' || c == '\u0003' || c == '\u0004') { sb.Append(' '); continue; }
+            if (c < ' ')
+            {
+                if (!singleLine && (c == '\r' || c == '\n' || c == '\t')) sb.Append(c);
+                else sb.Append(' ');
+                continue;
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     static bool AtomicWriteText(string path, string content)
@@ -324,19 +335,44 @@ public partial class MainForm
         int currentEditIdx = -1;
         bool suppressLoad = false;
 
-        Action commitPendingEdit = delegate
+        Action<int, bool> saveEditAt = delegate(int idx, bool syncTitleBox)
         {
-            if (currentEditIdx >= 0 && currentEditIdx < cTitles.Length)
+            if (idx < 0 || idx >= cTitles.Length) return;
+            string newTitle = tTitle.Text.Trim();
+            string newText = tText.Text;
+            if (newTitle.Length == 0)
             {
-                string newTitle = tTitle.Text.Trim();
-                string newText = tText.Text;
-                if (newTitle.Length > 0 && (cTitles[currentEditIdx] != newTitle || cTexts[currentEditIdx] != newText))
+                if (cTexts[idx] != newText)
                 {
-                    cTitles[currentEditIdx] = newTitle;
-                    cTexts[currentEditIdx] = newText;
+                    cTexts[idx] = newText;
                     SaveCustom();
+                    toast.ShowText("名称不能为空，已保留原名称并保存正文");
+                }
+                if (syncTitleBox)
+                {
+                    suppressLoad = true;
+                    tTitle.Text = cTitles[idx];
+                    suppressLoad = false;
+                }
+                return;
+            }
+            if (cTitles[idx] != newTitle || cTexts[idx] != newText)
+            {
+                cTitles[idx] = newTitle;
+                cTexts[idx] = newText;
+                SaveCustom();
+                if (idx < list.Items.Count)
+                {
+                    suppressLoad = true;
+                    list.Items[idx] = newTitle;
+                    suppressLoad = false;
                 }
             }
+        };
+
+        Action commitPendingEdit = delegate
+        {
+            saveEditAt(currentEditIdx, true);
         };
 
         Action<int> loadInto = delegate(int i)
@@ -488,19 +524,8 @@ public partial class MainForm
         list.SelectedIndexChanged += delegate
         {
             if (suppressLoad) return;
-            if (currentEditIdx >= 0 && currentEditIdx < cTitles.Length && currentEditIdx != list.SelectedIndex)
-            {
-                string editedTitle = tTitle.Text.Trim();
-                if (editedTitle.Length > 0 && (cTitles[currentEditIdx] != editedTitle || cTexts[currentEditIdx] != tText.Text))
-                {
-                    cTitles[currentEditIdx] = editedTitle;
-                    cTexts[currentEditIdx] = tText.Text;
-                    SaveCustom();
-                    suppressLoad = true;
-                    list.Items[currentEditIdx] = editedTitle;
-                    suppressLoad = false;
-                }
-            }
+            if (currentEditIdx >= 0 && currentEditIdx != list.SelectedIndex)
+                saveEditAt(currentEditIdx, false);
             loadInto(list.SelectedIndex);
         };
 

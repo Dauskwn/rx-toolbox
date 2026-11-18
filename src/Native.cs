@@ -60,19 +60,51 @@ public static class Native
 
     // ===== 输入法切换（避免中文输入法吞键）=====
     [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint idThread);
+    [DllImport("user32.dll")] static extern int GetKeyboardLayoutList(int nBuff, [Out] IntPtr[] lpList);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadKeyboardLayoutW(string id, uint flags);
+    [DllImport("user32.dll")] static extern bool UnloadKeyboardLayout(IntPtr hkl);
 
     const uint WM_INPUTLANGCHANGEREQUEST = 0x0050;
 
+    static IntPtr FindInstalledEnglishLayout()
+    {
+        try
+        {
+            int n = GetKeyboardLayoutList(0, null);
+            if (n <= 0 || n > 64) return IntPtr.Zero;
+            var list = new IntPtr[n];
+            int got = GetKeyboardLayoutList(n, list);
+            for (int i = 0; i < got; i++)
+            {
+                uint langId = unchecked((uint)list[i].ToInt64()) & 0xFFFFu;
+                if (langId == 0x0409u) return list[i];
+            }
+        }
+        catch { }
+        return IntPtr.Zero;
+    }
+
     public static IntPtr SwitchToEnglish(IntPtr hwnd)
     {
+        IntPtr dummy;
+        return SwitchToEnglish(hwnd, out dummy);
+    }
+
+    public static IntPtr SwitchToEnglish(IntPtr hwnd, out IntPtr tempLoaded)
+    {
         IntPtr old = IntPtr.Zero;
+        tempLoaded = IntPtr.Zero;
         try
         {
             uint pid;
             uint tid = GetWindowThreadProcessId(hwnd, out pid);
             old = GetKeyboardLayout(tid);
-            IntPtr en = LoadKeyboardLayoutW("04090409", 0x00000001);
+            IntPtr en = FindInstalledEnglishLayout();
+            if (en == IntPtr.Zero)
+            {
+                en = LoadKeyboardLayoutW("04090409", 0x00000001);
+                if (en != IntPtr.Zero && en != old) tempLoaded = en;
+            }
             if (en != IntPtr.Zero) PostMessage(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, en);
         }
         catch { }
@@ -81,9 +113,28 @@ public static class Native
 
     public static void RestoreLayout(IntPtr hwnd, IntPtr layout)
     {
-        if (hwnd == IntPtr.Zero || layout == IntPtr.Zero) return;
-        try { PostMessage(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, layout); }
-        catch { }
+        RestoreLayout(hwnd, layout, IntPtr.Zero);
+    }
+
+    public static void RestoreLayout(IntPtr hwnd, IntPtr layout, IntPtr tempLoaded)
+    {
+        if (hwnd != IntPtr.Zero && layout != IntPtr.Zero)
+        {
+            try { PostMessage(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, layout); }
+            catch { }
+        }
+        if (tempLoaded != IntPtr.Zero && tempLoaded != layout)
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    System.Threading.Thread.Sleep(120);
+                    UnloadKeyboardLayout(tempLoaded);
+                }
+                catch { }
+            });
+        }
     }
 
     public static void PressCtrlV()
@@ -127,13 +178,25 @@ public static class Native
         SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
     }
 
+    public static Rectangle GetTargetScreenBounds()
+    {
+        try
+        {
+            IntPtr gw = FindGameWindow();
+            if (gw != IntPtr.Zero) return Screen.FromHandle(gw).Bounds;
+        }
+        catch { }
+        try { return Screen.PrimaryScreen.Bounds; }
+        catch { return new Rectangle(0, 0, GetSystemMetrics(0), GetSystemMetrics(1)); }
+    }
+
     public static void CenterPhysical(IntPtr h)
     {
         RECT r;
         if (!GetWindowRect(h, out r)) return;
         int w = r.R - r.L, ht = r.B - r.T;
-        int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
-        SetWindowPos(h, IntPtr.Zero, (sw - w) / 2, (sh - ht) / 2, 0, 0, 0x0001 | 0x0004 | 0x0010);
+        Rectangle scr = GetTargetScreenBounds();
+        SetWindowPos(h, IntPtr.Zero, scr.X + (scr.Width - w) / 2, scr.Y + (scr.Height - ht) / 2, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
 
     public static string LogPath = "";

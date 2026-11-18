@@ -1,5 +1,18 @@
 # 更新记录
 
+## 1.8.3（2026-11-19）
+
+### 安全与更新体验
+- **在线更新加固与进度可视**：默认更新地址及跳转链接强制校验 HTTPS（本地回环调试地址除外）；支持下载百分比实时进度条，系统代理不可达时自动尝试直连回退；`.old` 旧文件改为重启后延时/启动清理并支持异常回退（[MainForm.About.cs](src/MainForm.About.cs) / [program.cs](build/program.cs)）。
+- **备份脱敏与防误覆盖**：`.rxbak` 备份导入/导出自动对 `HubKey=` 进行脱敏处理，避免误传泄漏密钥；应用云端数据表前自动创建本地备份（`ApplyDataOverrides`），且仅落盘存在实际差异的条目（[MainForm.DataBackup.cs](src/MainForm.DataBackup.cs) / [MainForm.Data.cs](src/MainForm.Data.cs)）。
+
+### 体验优化与修复
+- **表格编辑防护与对比精准化**：`EditDataTab` 基于临时副本编辑，提供保存/取消明确确认及单元格文本规范化；`ComputeTabDiff` 与备份对比限定在各自段名范围内，列表摘要解析改为高性能流式读取（[MainForm.DevHub.cs](src/MainForm.DevHub.cs) / [MainForm.DataBackup.cs](src/MainForm.DataBackup.cs)）。
+- **多屏定位与输入法清理**：屏幕准星/倒计时支持按游戏窗口所在显示器坐标精准定位（`GetTargetScreenBounds`），副屏也能居中对齐；切英文输入法时若临时加载了系统英文布局，退出发送时自动卸载还原，不残留多余输入法（[Overlay.cs](src/Overlay.cs) / [Native.cs](src/Native.cs) / [MainForm.JoinAndOcr.cs](src/MainForm.JoinAndOcr.cs)）。
+- **服务端与发布工程化**：Worker 鉴权增加缓存与写入限流，开发者提交接口清晰透传 4xx/5xx 错因；新增 `build/verify.ps1` 与 `build/local_update_test.py` 一键回归及本地模拟自更新脚本（管理版自检增至 **87 项**）。
+
+---
+
 ## 1.8.2（2026-11-17）
 
 ### 新增与优化

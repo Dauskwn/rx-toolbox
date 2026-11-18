@@ -17,16 +17,34 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("GMod 挤服助手 + 屏幕准星 + 对局倒计时 + 自定义常用文本")]
 #endif
 [assembly: AssemblyCompany("RXToolbox")]
-[assembly: AssemblyVersion("1.8.2.0")]
-[assembly: AssemblyFileVersion("1.8.2.0")]
+[assembly: AssemblyVersion("1.8.3.0")]
+[assembly: AssemblyFileVersion("1.8.3.0")]
 
 static class Program
 {
     public const string TARGET_EXE_NAME = "Rx工具箱.exe";
     static bool g_dev;      // --dev 启动：多实例 + 标题带 DEV
+    static bool g_afterUpdate;
     static string g_migratedFrom = "";
     public static bool IsDev { get { return g_dev; } }
+    public static bool AfterUpdate { get { return g_afterUpdate; } }
     public static string MigratedFrom { get { return g_migratedFrom; } }
+
+    public static bool IsOtherEditionRunning()
+    {
+        string otherMutex =
+#if ADMIN_EDITION
+            @"Local\RXToolbox_SingleInstance_Mutex";
+#else
+            @"Local\RXToolbox_SingleInstance_Mutex_Admin";
+#endif
+        try
+        {
+            using (Mutex.OpenExisting(otherMutex))
+                return true;
+        }
+        catch { return false; }
+    }
 
     public static bool ShouldMigrateLegacyExeName(string fileName)
     {
@@ -104,6 +122,14 @@ static class Program
             string backedTarget = "";
             if (File.Exists(targetExe))
             {
+                try
+                {
+                    var curInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+                    var tgtInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(targetExe);
+                    if (MainForm.CompareVersion(tgtInfo.FileVersion, curInfo.FileVersion) >= 0)
+                        return false;
+                }
+                catch { }
                 backedTarget = MainForm.PickBackupPath(targetExe);
                 MainForm.MoveWithRetry(targetExe, backedTarget, 3);
             }
@@ -224,10 +250,8 @@ static class Program
     }
 
 #if ADMIN_EDITION
-    // 数据文件的地址：优先用 settings.ini 里 UpdateUrl 同目录的 phrases.json
-    static string DeriveDataUrl(string dataDir)
+    static string ReadConfiguredUpdateUrl(string dataDir)
     {
-        const string Default = "https://rx-toolbox.pages.dev/phrases.json";
         try
         {
             string ini = Path.Combine(dataDir, "settings.ini");
@@ -239,27 +263,94 @@ static class Program
                     if (eq <= 0) continue;
                     if (line.Substring(0, eq).Trim() != "UpdateUrl") continue;
                     string v = line.Substring(eq + 1).Trim();
-                    if (v.Length == 0) break;
-                    int slash = v.LastIndexOf('/');
-                    if (slash <= 0) break;
-                    return v.Substring(0, slash + 1) + "phrases.json";
+                    if (MainForm.IsAllowedUpdateUrl(v)) return v;
                 }
             }
         }
         catch { }
+        return MainForm.UPDATE_URL_DEFAULT;
+    }
+
+    // 数据文件的地址：优先用 settings.ini 里 UpdateUrl 同目录的 phrases.json（仅接受 https://）
+    static string DeriveDataUrl(string dataDir)
+    {
+        const string Default = "https://rx-toolbox.pages.dev/phrases.json";
+        string v = ReadConfiguredUpdateUrl(dataDir);
+        int slash = v.LastIndexOf('/');
+        if (slash > 8) return v.Substring(0, slash + 1) + "phrases.json";
         return Default;
+    }
+
+    static bool TryFetchFirstRunData(string dataDir, string target)
+    {
+        string tmp = target + ".tmp";
+        try
+        {
+            string dataUrl = DeriveDataUrl(dataDir);
+            string expectedSha = "";
+            try
+            {
+                string verJson = MainForm.HttpGetText(ReadConfiguredUpdateUrl(dataDir), 6000);
+                string du = MainForm.JsonField(verJson, "dataUrl");
+                string dsha = MainForm.JsonField(verJson, "dataSha256");
+                if (MainForm.IsAllowedUpdateUrl(du)) dataUrl = du;
+                if (!string.IsNullOrEmpty(dsha) && dsha.Length == 64) expectedSha = dsha;
+            }
+            catch { }
+
+            if (!MainForm.IsAllowedUpdateUrl(dataUrl)) return false;
+
+            if (!string.IsNullOrEmpty(expectedSha))
+            {
+                if (!MainForm.DownloadAndVerify(dataUrl, expectedSha, tmp)) return false;
+            }
+            else
+            {
+                string raw = MainForm.HttpGetTextWithFallback(dataUrl, 8000, "RXToolbox-FirstRun");
+                if (string.IsNullOrEmpty(raw) || MainForm.Data.ParseTables(raw) == null) return false;
+                File.WriteAllText(tmp, raw, new System.Text.UTF8Encoding(false));
+            }
+
+            if (!File.Exists(tmp) || new FileInfo(tmp).Length <= 1024) return false;
+            if (MainForm.Data.ParseTables(File.ReadAllText(tmp, System.Text.Encoding.UTF8)) == null) return false;
+
+            if (File.Exists(target))
+            {
+                try { File.Replace(tmp, target, null); }
+                catch { File.Copy(tmp, target, true); }
+            }
+            else
+            {
+                try { File.Move(tmp, target); }
+                catch { File.Copy(tmp, target, true); }
+            }
+            return MainForm.Data.Load(target);
+        }
+        catch (Exception ex)
+        {
+            Native.Log("data: 自动下载失败 " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+        }
     }
 #endif
 
     static void RunApp(bool afterUpdate)
     {
+        g_afterUpdate = afterUpdate;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        MainForm form = null;
         Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e)
         {
             if (e != null && e.Exception != null)
                 Native.Log("UI ThreadException: " + e.Exception);
+            if (form != null && !form.IsDisposed)
+                form.NotifyInternalError();
         };
         AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
         {
@@ -286,58 +377,33 @@ static class Program
         }
 
         Native.LogPath = Path.Combine(dataDir, "rx.log");
-#if ADMIN_EDITION
-        MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(dataDir, "phrases.json"), afterUpdate);
-        if (!string.Equals(dataDir, exeDir, StringComparison.OrdinalIgnoreCase))
-            MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(exeDir, "phrases.json"), false);
-
-        // 数据从 phrases.json 读（不再编进 exe）：先找数据目录，再退回 exe 目录
         string phrases = Path.Combine(dataDir, "phrases.json");
+        // 升级重启后（afterUpdate=true）先保留 .old 到窗体 OnShown 成功后再清理，确保构造崩溃还能回滚
+        if (!afterUpdate)
+        {
+#if ADMIN_EDITION
+            MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, phrases, false);
+            if (!string.Equals(dataDir, exeDir, StringComparison.OrdinalIgnoreCase))
+                MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, Path.Combine(exeDir, "phrases.json"), false);
+#else
+            MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, "", false);
+#endif
+        }
+
+#if ADMIN_EDITION
+        // 数据从 phrases.json 读（不再编进 exe）：先找数据目录，再退回 exe 目录
         if (!MainForm.Data.Load(phrases) && !string.Equals(dataDir, exeDir, StringComparison.OrdinalIgnoreCase))
             MainForm.Data.Load(Path.Combine(exeDir, "phrases.json"));
         if (!MainForm.Data.Loaded)
         {
-            // 从 1.7.0 升级上来的用户：老版本的更新器不会下载数据文件，
-            // 所以这里自愈一次，把 phrases.json 拉下来
             Native.Log("data: 没找到 phrases.json，尝试自动获取");
-            string dataUrl = DeriveDataUrl(dataDir);
-            if (!string.IsNullOrEmpty(dataUrl) &&
-                (dataUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-                 dataUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
-            {
-                string target = Path.Combine(dataDir, "phrases.json");
-                try
-                {
-                    var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(dataUrl);
-                    req.Timeout = 6000;
-                    req.ReadWriteTimeout = 6000;
-                    req.Proxy = null;
-                    req.UserAgent = "RXToolbox-FirstRun";
-                    using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
-                    using (var st = resp.GetResponseStream())
-                    using (var fs = File.Create(target))
-                    {
-                        st.CopyTo(fs);
-                    }
-                    if (new FileInfo(target).Length > 1024)
-                    {
-                        MainForm.Data.Load(target);
-                        Native.Log("data: 自动下载成功 " + target);
-                    }
-                    else
-                    {
-                        try { File.Delete(target); } catch { }
-                    }
-                }
-                catch (Exception ex) { Native.Log("data: 自动下载失败 " + ex.Message); }
-            }
+            if (TryFetchFirstRunData(dataDir, phrases))
+                Native.Log("data: 自动下载成功 " + phrases);
         }
         if (!MainForm.Data.Loaded)
             Native.Log("data: 仍然没有数据（界面会是空表，可重新下载完整压缩包）");
         else
             Native.Log("data: " + MainForm.Data.SourcePath);
-#else
-        MainForm.CleanupUpdateArtifacts(Application.ExecutablePath, "", afterUpdate);
 #endif
 
         var titles = new List<string>();
@@ -353,7 +419,6 @@ static class Program
 #endif
 
         string icoPath = Path.Combine(exeDir, "rx.ico");
-        MainForm form = null;
         try
         {
             form = new MainForm(icoPath, titles.ToArray(), lists.ToArray(), dataDir);
@@ -361,6 +426,36 @@ static class Program
         catch (Exception ex)
         {
             Native.Log("startup EX: " + ex);
+            string exePath = Application.ExecutablePath;
+            string oldExe = exePath + ".old";
+            if (afterUpdate && File.Exists(oldExe))
+            {
+                if (MessageBox.Show(
+                        "新版本启动失败：" + ex.Message + "\r\n\r\n检测到升级前旧版本备份，是否立即恢复到上一版本并重启？",
+                        "RX 工具箱 - 恢复旧版本",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                {
+                    try
+                    {
+#if ADMIN_EDITION
+                        MainForm.RollbackSelfUpdateFiles(exePath, oldExe, exePath + ".upd",
+                            phrases, phrases + ".old", phrases + ".upd");
+#else
+                        MainForm.RollbackSelfUpdateFiles(exePath, oldExe, exePath + ".upd", "", "", "");
+#endif
+                        var psi = new System.Diagnostics.ProcessStartInfo();
+                        psi.FileName = exePath;
+                        psi.WorkingDirectory = Path.GetDirectoryName(exePath);
+                        psi.UseShellExecute = false;
+                        using (var p = System.Diagnostics.Process.Start(psi)) { }
+                    }
+                    catch (Exception rex)
+                    {
+                        MessageBox.Show("恢复失败：" + rex.Message, "RX 工具箱", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                return;
+            }
             MessageBox.Show("启动失败：" + ex.Message, "RX 工具箱", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }

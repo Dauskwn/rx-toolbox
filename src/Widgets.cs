@@ -1504,8 +1504,19 @@ public class WrapList : Control
         base.OnResize(e);
         measuredWidth = -1;
         layoutValid = false;
+        if (!Visible) return;
         EnsureHeights();
         Invalidate();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible && (!layoutValid || measuredWidth != ViewWidth))
+        {
+            EnsureHeights();
+            Invalidate();
+        }
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -1873,8 +1884,8 @@ public class Toast : Form
         int h = 46;
         if (Width != w || Height != h) Size = new Size(w, h);
         Native.ApplyRoundRegion(this, 10);
-        int sw = Native.GetSystemMetrics(0);
-        Native.SetWindowPos(Handle, new IntPtr(-1), (sw - w) / 2, 60, w, h, 0x0010);
+        Rectangle scr = Native.GetTargetScreenBounds();
+        Native.SetWindowPos(Handle, new IntPtr(-1), scr.X + (scr.Width - w) / 2, scr.Y + 60, w, h, 0x0010);
     }
 
     protected override void OnPaint(PaintEventArgs e)

@@ -37,13 +37,20 @@ public partial class MainForm
             return new IPEndPoint(ip, port);
         try
         {
-            IAsyncResult ar = Dns.BeginGetHostAddresses(host, null, null);
-            using (WaitHandle wh = ar.AsyncWaitHandle)
+            IPAddress[] addrs = null;
+            using (var done = new ManualResetEventSlim(false))
             {
-                if (!wh.WaitOne(Math.Max(300, timeoutMs)))
+                Dns.BeginGetHostAddresses(host, delegate(IAsyncResult ar)
+                {
+                    try { addrs = Dns.EndGetHostAddresses(ar); }
+                    catch { }
+                    try { done.Set(); }
+                    catch { }
+                }, null);
+                if (!done.Wait(Math.Max(300, timeoutMs)))
                     return null;
             }
-            IPAddress[] addrs = Dns.EndGetHostAddresses(ar);
+            if (addrs == null) return null;
             for (int i = 0; i < addrs.Length; i++)
                 if (addrs[i].AddressFamily == AddressFamily.InterNetwork)
                     return new IPEndPoint(addrs[i], port);
@@ -114,9 +121,8 @@ public partial class MainForm
         for (int i = 0; i < total; i++)
         {
             byte[] ch = chunks[i];
-            if (ch == null) return null;
-            int offset = (i > 0 && ch.Length >= 4 && ch[0] == 0xFF && ch[1] == 0xFF && ch[2] == 0xFF && ch[3] == 0xFF) ? 4 : 0;
-            ms.Write(ch, offset, ch.Length - offset);
+            if (ch == null || ch.Length > 65536 || ms.Length + ch.Length > 65536) return null;
+            ms.Write(ch, 0, ch.Length);
         }
         return ms.ToArray();
     }

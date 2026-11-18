@@ -62,8 +62,8 @@ def main():
     args = ap.parse_args()
 
     is_player = (args.edition == "player")
-    base_url = args.base or ("https://rx-tools.pages.dev" if is_player else "")
-    fallback_url = args.fallback or ("https://github.com/Dauskwn/rx-tools/releases" if is_player else "")
+    base_url = args.base or ("https://rx-tools.pages.dev" if is_player else "https://rx-toolbox.pages.dev")
+    fallback_url = args.fallback or ("https://github.com/Dauskwn/rx-tools/releases" if is_player else "https://github.com/Dauskwn/rx-toolbox/releases")
     out = args.out or os.path.join(DIST, "update-player" if is_player else "update")
 
     exe = args.exe

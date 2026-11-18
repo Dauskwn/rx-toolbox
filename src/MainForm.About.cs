@@ -29,15 +29,18 @@ public partial class MainForm
             spacerPage.Text = "";
             tabs.PerformLayout();
 
-            // 二分找空格数：让"关于"的右边界尽量贴近 target
+            // 二分找空格数：让"关于"的右边界尽量贴近 target 且不换到第二行
+            int aboutIdx = tabs.TabPages.IndexOf(aboutPage);
+            if (aboutIdx < 0) return;
+            int rowY = tabs.GetTabRect(0).Y;
             int lo = 0, hi = 400, best = 0;
             for (int iter = 0; iter < 9; iter++)
             {
                 int mid = (lo + hi) / 2;
                 spacerPage.Text = mid == 0 ? "" : new string(' ', mid);
                 tabs.PerformLayout();
-                int right = tabs.GetTabRect(tabs.TabPages.IndexOf(aboutPage)).Right;
-                if (right <= target) { best = mid; lo = mid + 1; }
+                Rectangle ar = tabs.GetTabRect(aboutIdx);
+                if (ar.Y == rowY && ar.Right <= target) { best = mid; lo = mid + 1; }
                 else hi = mid - 1;
                 if (lo > hi) break;
             }
@@ -52,6 +55,10 @@ public partial class MainForm
 #if ADMIN_EDITION
     static readonly string[] CHANGELOG = new string[]
     {
+        "1.8.3|2026-11-19|" +
+            "在线更新支持实时百分比进度显示并在代理异常时自动尝试直连，同时强化 HTTPS 校验、延时清理旧版与失败回退机制~" +
+            "云端数据更新覆盖前自动保留本地备份、备份自动隐藏敏感密钥、对比仅列差异条目；支持多显示器副屏准星定位、表格编辑确认防误改与临时英文输入法自动卸载~" +
+            "修复开发者工具上传报错提示、备份索引解析及挤服热键提示冲突问题（管理版自检增至 87 项）",
         "1.8.2|2026-11-17|" +
             "分类表启动时默认全部收起，单次运行内切页、切写法或填目标 ID 保留你调整过的展开/折叠状态，并在「编辑条目」旁新增「全部展开 / 全部收起」一键切换按钮~" +
             "优化屏幕准星与倒计时悬浮窗置顶策略：切回游戏或经全屏缩放窗口切回前台时自动延迟补齐置顶（不抢焦点），解决被遮挡问题~" +
@@ -667,20 +674,42 @@ public partial class MainForm
         SetDynamicLabelColor(lblUpdState, c);
     }
 
-    static string HttpGetText(string url, int timeoutMs)
+    internal static HttpWebRequest CreateHttpRequest(string url, int timeoutMs, string ua, bool useProxy)
     {
-        try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }
+        try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072 | (SecurityProtocolType)12288; } catch { }
         var req = (HttpWebRequest)WebRequest.Create(url);
         req.Timeout = timeoutMs;
-        req.ReadWriteTimeout = timeoutMs;
-        req.UserAgent = "RXToolbox/" + APP_VERSION_NUM;
-        req.Proxy = null;
-        using (var resp = (HttpWebResponse)req.GetResponse())
-        using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-            return sr.ReadToEnd();
+        req.ReadWriteTimeout = Math.Max(timeoutMs, 15000);
+        req.UserAgent = string.IsNullOrEmpty(ua) ? ("RXToolbox/" + APP_VERSION_NUM) : ua;
+        if (!useProxy) req.Proxy = null;
+        return req;
     }
 
-    static string JsonField(string json, string key)
+    internal static string HttpGetTextWithFallback(string url, int timeoutMs, string ua)
+    {
+        try
+        {
+            var req = CreateHttpRequest(url, timeoutMs, ua, true);
+            using (var resp = (HttpWebResponse)req.GetResponse())
+            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                return sr.ReadToEnd();
+        }
+        catch (WebException we)
+        {
+            if (we.Status == WebExceptionStatus.ProtocolError) throw;
+            var reqDirect = CreateHttpRequest(url, timeoutMs, ua, false);
+            using (var resp = (HttpWebResponse)reqDirect.GetResponse())
+            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                return sr.ReadToEnd();
+        }
+    }
+
+    internal static string HttpGetText(string url, int timeoutMs)
+    {
+        return HttpGetTextWithFallback(url, timeoutMs, "RXToolbox/" + APP_VERSION_NUM);
+    }
+
+    internal static string JsonField(string json, string key)
     {
         if (string.IsNullOrEmpty(json)) return "";
         Match m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
@@ -688,7 +717,7 @@ public partial class MainForm
         return JsonUnesc(m.Groups[1].Value);
     }
 
-    static int CompareVersion(string a, string b)
+    internal static int CompareVersion(string a, string b)
     {
         string[] pa = (a ?? "").Split('.');
         string[] pb = (b ?? "").Split('.');
@@ -712,17 +741,91 @@ public partial class MainForm
             || u.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
     }
 
-    static bool DownloadAndVerify(string url, string sha, string dest)
+    internal static bool IsHttpsUrl(string u)
+    {
+        if (string.IsNullOrEmpty(u)) return false;
+        return u.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 允许 https://，以及本机回环调试端口 http://127.0.0.1 / localhost / [::1]；严禁非本机明文 http://
+    internal static bool IsAllowedUpdateUrl(string u)
+    {
+        if (IsHttpsUrl(u)) return true;
+        if (!IsHttpUrl(u)) return false;
+        Uri uri;
+        if (Uri.TryCreate(u, UriKind.Absolute, out uri))
+            return string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase) && uri.IsLoopback;
+        return false;
+    }
+
+    static void StreamHttpDownload(string url, string dest, bool useProxy, Action<int> onPercent)
+    {
+        var req = CreateHttpRequest(url, 15000, "RXToolbox-Updater", useProxy);
+        req.ReadWriteTimeout = 30000;
+        using (var resp = (HttpWebResponse)req.GetResponse())
+        {
+            long total = resp.ContentLength;
+            long done = 0;
+            int lastPct = -1;
+            byte[] buf = new byte[65536];
+            using (var st = resp.GetResponseStream())
+            using (var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                int n;
+                while ((n = st.Read(buf, 0, buf.Length)) > 0)
+                {
+                    fs.Write(buf, 0, n);
+                    done += n;
+                    if (onPercent != null && total > 0)
+                    {
+                        int pct = (int)Math.Min(100L, done * 100L / total);
+                        if (pct >= lastPct + 5 || pct == 100)
+                        {
+                            lastPct = pct;
+                            onPercent(pct);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    internal static bool DownloadAndVerify(string url, string sha, string dest)
+    {
+        return DownloadAndVerify(url, sha, dest, null);
+    }
+
+    internal static bool DownloadAndVerify(string url, string sha, string dest, Action<int> onPercent)
     {
         if (string.IsNullOrEmpty(sha) || sha.Length != 64) return false;
+        bool isFileUri = !string.IsNullOrEmpty(url) && url.StartsWith("file://", StringComparison.OrdinalIgnoreCase);
+        if (!isFileUri && !IsAllowedUpdateUrl(url)) return false;
+
         try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072 | (SecurityProtocolType)12288; } catch { }
-        using (var wc = new WebClient())
+        try
         {
-            wc.Headers.Add("User-Agent", "RXToolbox-Updater");
-            wc.DownloadFile(url, dest);
+            if (isFileUri)
+            {
+                using (var wc = new WebClient())
+                    wc.DownloadFile(url, dest);
+            }
+            else
+            {
+                try
+                {
+                    StreamHttpDownload(url, dest, true, onPercent);
+                }
+                catch (WebException we)
+                {
+                    if (we.Status == WebExceptionStatus.ProtocolError) throw;
+                    TryDeleteFile(dest, 1);
+                    StreamHttpDownload(url, dest, false, onPercent);
+                }
+            }
+            string got = Sha256File(dest);
+            if (string.Equals(got, sha, StringComparison.OrdinalIgnoreCase)) return true;
         }
-        string got = Sha256File(dest);
-        if (string.Equals(got, sha, StringComparison.OrdinalIgnoreCase)) return true;
+        catch { }
         TryDeleteFile(dest, 1);
         return false;
     }
@@ -738,7 +841,7 @@ public partial class MainForm
         catch { return false; }
     }
 
-    static string Sha256File(string path)
+    internal static string Sha256File(string path)
     {
         using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         using (var sha = new System.Security.Cryptography.SHA256Managed())
@@ -1016,7 +1119,13 @@ public partial class MainForm
     void StartSelfUpdate()
     {
         string u = !string.IsNullOrEmpty(updLatestUrl) ? updLatestUrl : updLatestFallback;
-        if (!IsHttpUrl(u)) { ShowUpdateHelp(); return; }
+        if (!IsAllowedUpdateUrl(u))
+        {
+            if (IsHttpUrl(u))
+                SetUpdState("仅支持 https:// 安全更新地址（或本机回环调试端口），请检查配置或手动下载", Color.FromArgb(184, 88, 44));
+            ShowUpdateHelp();
+            return;
+        }
 
         string exePath = Application.ExecutablePath;
         string dir = Path.GetDirectoryName(exePath);
@@ -1072,14 +1181,24 @@ public partial class MainForm
             string err = null;
             try
             {
-                if (!DownloadAndVerify(u, sha, updExe))
+                if (!DownloadAndVerify(u, sha, updExe, delegate(int pct)
+                {
+                    SafeBeginInvoke(delegate
+                    {
+                        if (updBusy) SetUpdState("正在下载新版本… " + pct + "%", Color.FromArgb(60, 90, 140));
+                    });
+                }))
                     throw new Exception("程序文件校验不一致（可能下载不完整）");
 #if ADMIN_EDITION
                 if (needDownloadData)
                 {
-                    if (!IsHttpUrl(dataUrl))
-                        throw new Exception("数据文件地址格式无效");
-                    if (!DownloadAndVerify(dataUrl, dataSha, updData))
+                    if (!IsAllowedUpdateUrl(dataUrl))
+                        throw new Exception("数据文件地址非 HTTPS/本机回环或格式无效");
+                    SafeBeginInvoke(delegate
+                    {
+                        if (updBusy) SetUpdState("正在更新指令表数据…", Color.FromArgb(60, 90, 140));
+                    });
+                    if (!DownloadAndVerify(dataUrl, dataSha, updData, null))
                         throw new Exception("数据文件校验不一致（可能下载不完整）");
                 }
 #endif
@@ -1210,6 +1329,11 @@ public partial class MainForm
             SetUpdState("未配置更新地址（当前版本不会联网）", Color.FromArgb(120, 128, 140));
             return;
         }
+        if (!IsAllowedUpdateUrl(updateUrl))
+        {
+            if (manual) SetUpdState("更新地址必须以 https:// 开头（或为本机回环调试端口），请检查 settings.ini", Color.FromArgb(184, 88, 44));
+            return;
+        }
         updBusy = true;
         if (manual)
         {
@@ -1233,6 +1357,7 @@ public partial class MainForm
             }
 
             string ver = JsonField(json, "version");
+            string minVer = JsonField(json, "minVersion");
             string dl = JsonField(json, "url");
             string fb = JsonField(json, "fallback");
             string notes = JsonField(json, "notes");
@@ -1243,50 +1368,51 @@ public partial class MainForm
 #endif
             // JsonField 已把 \n 还原成真换行，这里不再处理
 
-            try
+            SafeBeginInvoke(delegate
             {
-                BeginInvoke((MethodInvoker)delegate
+                updBusy = false;
+                if (btnUpdCheck != null) btnUpdCheck.Enabled = true;
+
+                if (err != null)
                 {
-                    updBusy = false;
-                    if (btnUpdCheck != null) btnUpdCheck.Enabled = true;
+                    if (manual) SetUpdState("检查失败（" + err + "）：网络异常或服务器无响应，请稍后重试“检查更新”", Color.FromArgb(184, 88, 44));
+                    return;
+                }
+                if (string.IsNullOrEmpty(ver))
+                {
+                    if (manual) SetUpdState("更新信息格式不对，稍后再试", Color.FromArgb(184, 88, 44));
+                    return;
+                }
 
-                    if (err != null)
-                    {
-                        if (manual) SetUpdState("检查失败（" + err + "）：网络异常或服务器无响应，请稍后重试“检查更新”", Color.FromArgb(184, 88, 44));
-                        return;
-                    }
-                    if (string.IsNullOrEmpty(ver))
-                    {
-                        if (manual) SetUpdState("更新信息格式不对，稍后再试", Color.FromArgb(184, 88, 44));
-                        return;
-                    }
-
-                    updLatestVersion = ver;
-                    updLatestUrl = dl;
-                    updLatestFallback = fb;
-                    updLatestSha = sha;
+                updLatestVersion = ver;
+                updLatestUrl = dl;
+                updLatestFallback = fb;
+                updLatestSha = sha;
 #if ADMIN_EDITION
-                    updLatestDataUrl = dataUrl;
-                    updLatestDataSha = dataSha;
+                updLatestDataUrl = dataUrl;
+                updLatestDataSha = dataSha;
 #endif
 
-                    if (CompareVersion(ver, APP_VERSION_NUM) > 0)
-                    {
-                        SetUpdState("发现新版本 v" + ver + "（当前 " + APP_VERSION_NUM + "）", Color.FromArgb(20, 130, 70));
-                        if (btnUpdOpen != null) btnUpdOpen.Enabled = true;
-                        updLatestNotes = notes;
-                        RenderChangelog();
-                        if (toast != null) toast.ShowText("发现新版本 v" + ver + "，可在“关于”页查看详情");
-                    }
+                if (CompareVersion(ver, APP_VERSION_NUM) > 0)
+                {
+                    bool belowMin = !string.IsNullOrEmpty(minVer) && CompareVersion(APP_VERSION_NUM, minVer) < 0;
+                    if (belowMin)
+                        SetUpdState("⚠ 发现必要兼容更新 v" + ver + "（当前低于最低兼容版本 " + minVer + "），请立即更新", Color.FromArgb(184, 88, 44));
                     else
-                    {
-                        SetUpdState("已是最新版本（" + APP_VERSION_NUM + "）", Color.FromArgb(60, 110, 90));
-                        if (btnUpdOpen != null) btnUpdOpen.Enabled = false;
-                        if (manual && !string.IsNullOrEmpty(notes)) updLatestNotes = notes;
-                    }
-                });
-            }
-            catch { }
+                        SetUpdState("发现新版本 v" + ver + "（当前 " + APP_VERSION_NUM + "）", Color.FromArgb(20, 130, 70));
+                    if (btnUpdOpen != null) btnUpdOpen.Enabled = true;
+                    updLatestNotes = notes;
+                    RenderChangelog();
+                    if (toast != null)
+                        toast.ShowText(belowMin ? ("发现必要更新 v" + ver + "，请前往“关于”页立即更新") : ("发现新版本 v" + ver + "，可在“关于”页查看详情"));
+                }
+                else
+                {
+                    SetUpdState("已是最新版本（" + APP_VERSION_NUM + "）", Color.FromArgb(60, 110, 90));
+                    if (btnUpdOpen != null) btnUpdOpen.Enabled = false;
+                    if (manual && !string.IsNullOrEmpty(notes)) updLatestNotes = notes;
+                }
+            });
         });
         updThread.IsBackground = true;
         updThread.Start();
