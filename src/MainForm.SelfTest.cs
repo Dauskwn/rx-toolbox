@@ -26,6 +26,16 @@ public partial class MainForm
             sb.AppendLine("RX 工具箱 UI dump  " + APP_VERSION + "  " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             sb.AppendLine("title " + Text);
             sb.AppendLine("form " + ClientSize.Width + "x" + ClientSize.Height);
+#if ADMIN_EDITION
+            foreach (var kv in navPages)
+            {
+                Control pg = kv.Value;
+                if (pg == null) continue;
+                sb.AppendLine();
+                sb.AppendLine("[nav " + kv.Key + "] " + pg.Text + "  (" + pg.Controls.Count + " 个直接子控件)");
+                DumpControls(sb, pg, "  ", 0);
+            }
+#else
             for (int t = 0; t < tabs.TabPages.Count; t++)
             {
                 TabPage pg = tabs.TabPages[t];
@@ -33,6 +43,7 @@ public partial class MainForm
                 sb.AppendLine("[tab " + t + "] " + pg.Text + "  (" + pg.Controls.Count + " 个直接子控件)");
                 DumpControls(sb, pg, "  ", 0);
             }
+#endif
             string dir = Path.GetDirectoryName(Application.ExecutablePath);
             if (!CanWriteDir(dir))
             {
@@ -268,8 +279,14 @@ public partial class MainForm
                 deSampleList.Count == 1 && deSampleList[0].TriggerMode == 1
                 && deSampleList[0].StartSec == 870 && deSampleList[0].EndSec == 810
                 && deSampleList[0].FlashMode == 1 && deSampleList[0].LabelText == "刷支援", "");
+#if ADMIN_EDITION
+            chk("热键配置表长度一致（9 项含全局命令面板）",
+                HK_COUNT == 9 && HKDefVk.Length == 9 && HKDefMod.Length == 9 && HKFunc.Length == 9 && HKTip.Length == 9
+                && HKDefVk[8] == 0x4B && HKDefMod[8] == 0x0001, "");
+#else
             chk("热键配置表长度一致（8 项）",
-                HKDefVk.Length == 8 && HKDefMod.Length == 8 && HKFunc.Length == 8 && HKTip.Length == 8, "");
+                HK_COUNT == 8 && HKDefVk.Length == 8 && HKDefMod.Length == 8 && HKFunc.Length == 8 && HKTip.Length == 8, "");
+#endif
 
             var defPresets = TimerChainPreset.CreateDefaultPresets();
             string serChains = TimerChainPreset.SerializePresets(defPresets);
@@ -398,10 +415,10 @@ public partial class MainForm
 #if ADMIN_EDITION
             chk("管理版窗口标题后缀标识", APP_EDITION_SUFFIX == "（管理版）", APP_EDITION_SUFFIX);
             chk("更新日志首条与当前版本一致且高亮标记格式正确",
-                CHANGELOG.Length > 3
+                CHANGELOG.Length > 4
                 && CHANGELOG[0].StartsWith(APP_VERSION_NUM + "|", StringComparison.Ordinal)
-                && CHANGELOG[3].StartsWith("1.8.0|", StringComparison.Ordinal)
-                && CHANGELOG[3].Contains("Rx工具箱.exe")
+                && CHANGELOG[4].StartsWith("1.8.0|", StringComparison.Ordinal)
+                && CHANGELOG[4].Contains("Rx工具箱.exe")
                 && sawWarnLine && strippedWarn.StartsWith("【重要提醒】", StringComparison.Ordinal), "");
 #else
             chk("公开版更新日志、无管理后缀与独立更新源配置检查",
@@ -506,6 +523,49 @@ public partial class MainForm
                 chk("分类折叠：默认全收起、单次运行保留手动状态与一键全部展开/收起",
                     startAllFolded && keepUserAdj && expandedAll && collapsedAll, "");
             }
+
+            using (var wlPerf = new WrapList())
+            {
+                wlPerf.DefaultCollapsed = true;
+                wlPerf.Size = new Size(760, 300);
+                int grpCnt = 4, perGrp = 40;
+                int totRows = grpCnt * (1 + perGrp);
+                string[] pL = new string[totRows];
+                string[] pV = new string[totRows];
+                bool[] pH = new bool[totRows];
+                string[] pN = new string[totRows];
+                int pos = 0;
+                for (int g = 0; g < grpCnt; g++)
+                {
+                    pH[pos] = true; pL[pos] = "分组" + g; pV[pos] = ""; pN[pos] = ""; pos++;
+                    for (int r = 0; r < perGrp; r++)
+                    {
+                        pH[pos] = false;
+                        pL[pos] = "条目" + g + "_" + r;
+                        pV[pos] = "!cmd ^ " + r;
+                        pN[pos] = "注解" + r;
+                        pos++;
+                    }
+                }
+                wlPerf.SetData(pL, pV, pH, pN);
+                int vw0 = wlPerf.TestViewWidth;
+                int m0 = wlPerf.TestMeasureCount;
+                wlPerf.ToggleSection(0, false);   // 展开第0组（40项 > 300px，滚动条从无到有）
+                int vw1 = wlPerf.TestViewWidth;
+                int m1 = wlPerf.TestMeasureCount;
+                wlPerf.ToggleSection(0, false);   // 收起第0组（滚动条从有到无）
+                int m2 = wlPerf.TestMeasureCount;
+                wlPerf.Height = 600;              // 纯垂直拉高窗口
+                int m3 = wlPerf.TestMeasureCount;
+                wlPerf.ToggleSection(0, false);
+                wlPerf.ScrollTop = 180;
+                int targetRow = 10;
+                int relY = wlPerf.TestRowTop(targetRow) - wlPerf.ScrollTop + 8;
+                int hitRow = wlPerf.TestHitTest(relY);
+                chk("分类折叠性能：固定槽位按需懒测，滚动条切换与垂直缩放零重测且二分命中准确",
+                    m0 == 4 && vw0 == vw1 && m1 == 44 && m2 == 44 && m3 == 44 && hitRow == targetRow,
+                    string.Format("m0={0} m1={1} m2={2} m3={3} vw={4}/{5} hit={6}/{7}", m0, m1, m2, m3, vw0, vw1, hitRow, targetRow));
+            }
 #endif
 
 #if ADMIN_EDITION
@@ -608,6 +668,214 @@ public partial class MainForm
                 pruned == 3
                 && Directory.GetFiles(bakSubDir, "*_auto*.rxbak").Length == 2
                 && File.Exists(bakPkg), "pruned=" + pruned);
+#endif
+
+            // ---- V1.9.0 HUD 渲染与下一事件预告 ----
+            var next1 = TimerChainPreset.FindNextUpcomingNode(nStd, 1060);
+            var next2 = TimerChainPreset.FindNextUpcomingNode(nStd, 960);
+            var nextNone = TimerChainPreset.FindNextUpcomingNode(nStd, 10);
+            chk("倒计时下一事件预告 FindNextUpcomingNode",
+                next1 != null && next1.LabelText == "17:00 事件①"
+                && next2 != null && next2.LabelText == "15:00 轻收开门"
+                && nextNone == null, "");
+
+            string pngPath = Path.Combine(tmpDir, "alpha_cross.png");
+            using (var srcPng = new Bitmap(16, 16, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                for (int py = 0; py < 16; py++)
+                    for (int px = 0; px < 16; px++)
+                        srcPng.SetPixel(px, py, Color.FromArgb(0, 0, 0, 0));
+                srcPng.SetPixel(8, 8, Color.FromArgb(120, 0, 255, 0));
+                srcPng.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            using (Bitmap outPng = Overlay.PrepareCrosshairImage(pngPath))
+            {
+                chk("32-bit 准星 PrepareCrosshairImage 保留 PNG 半透明 Alpha",
+                    outPng != null && outPng.GetPixel(0, 0).A == 0 && outPng.GetPixel(8, 8).A == 120,
+                    outPng == null ? "null" : ("a=" + outPng.GetPixel(8, 8).A));
+            }
+
+            string bmpPath = Path.Combine(tmpDir, "opaque_cross.bmp");
+            using (var srcBmp = new Bitmap(16, 16, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
+            {
+                for (int py = 0; py < 16; py++)
+                    for (int px = 0; px < 16; px++)
+                        srcBmp.SetPixel(px, py, Color.Black);
+                srcBmp.SetPixel(8, 8, Color.White);
+                srcBmp.Save(bmpPath, System.Drawing.Imaging.ImageFormat.Bmp);
+            }
+            using (Bitmap outBmp = Overlay.PrepareCrosshairImage(bmpPath))
+            {
+                chk("32-bit 准星 PrepareCrosshairImage 不透明图自动抠底",
+                    outBmp != null && outBmp.GetPixel(0, 0).A == 0 && outBmp.GetPixel(8, 8).A == 255,
+                    outBmp == null ? "null" : ("corner=" + outBmp.GetPixel(0, 0).A + " center=" + outBmp.GetPixel(8, 8).A));
+            }
+
+            Color bgItem, fgItem, bgRole, fgRole, bgScp, fgScp, bgCust, fgCust;
+            ThemePalette.GetSourceBadgeColors("物品表", out bgItem, out fgItem);
+            ThemePalette.GetSourceBadgeColors("角色表", out bgRole, out fgRole);
+            ThemePalette.GetSourceBadgeColors("SCP角色", out bgScp, out fgScp);
+            ThemePalette.GetSourceBadgeColors("自定义", out bgCust, out fgCust);
+            using (var ovDef = new Overlay())
+            using (var cdDef = new CountdownOverlay())
+            {
+                chk("HUD 默认外观与语义色板检查",
+                    ovDef.OutlineWidth == 1 && ovDef.OpacityPct == 100
+                    && !cdDef.UseCardStyle
+                    && !bgItem.IsEmpty && !fgItem.IsEmpty && !bgRole.IsEmpty && !fgRole.IsEmpty
+                    && !bgScp.IsEmpty && !fgScp.IsEmpty && !bgCust.IsEmpty && !fgCust.IsEmpty
+                    && fgItem.ToArgb() != fgRole.ToArgb() && fgRole.ToArgb() != fgScp.ToArgb()
+                    && fgScp.ToArgb() != fgCust.ToArgb(), "");
+            }
+
+#if ADMIN_EDITION
+            // ---- V1.9.0 管理版工作台、拼音与命令面板自检 ----
+            chk("拼音首字母引擎 PinyinHelper.GetInitials",
+                PinyinHelper.GetInitials("血肉枪") == "xrq"
+                && PinyinHelper.GetInitials("MTF开局") == "mtfkj"
+                && PinyinHelper.GetInitials("清理") == "ql"
+                && PinyinHelper.GetInitials("") == "",
+                PinyinHelper.GetInitials("血肉枪"));
+
+            var palEntries = new List<PaletteEntry>();
+            palEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("指令表", "标题精确"),
+                SourceTab = "指令表", Title = "标题精确", Body = "!ex", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("标题精确"), IsPinned = false, RecentOrder = -1
+            });
+            palEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("物品表", "血肉枪"),
+                SourceTab = "物品表", Title = "血肉枪", Body = "!give ^ xrq", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("血肉枪"), IsPinned = false, RecentOrder = -1
+            });
+            palEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("角色表", "置顶常用"),
+                SourceTab = "角色表", Title = "置顶常用", Body = "!fs ^ mtf", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("置顶常用"), IsPinned = true, RecentOrder = -1
+            });
+            var topPinned = CommandPaletteForm.ScoreAndFilter(palEntries, "", 10);
+            var hitPy = CommandPaletteForm.ScoreAndFilter(palEntries, "xrq", 10);
+            var hitAnd = CommandPaletteForm.ScoreAndFilter(palEntries, "物品 xrq", 10);
+            chk("全局命令面板跨表检索评分与置顶排序",
+                topPinned.Count >= 1 && topPinned[0].Title == "置顶常用"
+                && hitPy.Count == 1 && hitPy[0].Title == "血肉枪"
+                && hitAnd.Count == 1 && hitAnd[0].Title == "血肉枪", "");
+
+            palEntries[1].RecentOrder = 0;
+            var emptyFull = CommandPaletteForm.ScoreAndFilter(palEntries, "", 10);
+            chk("命令面板空查询不折叠（收藏 → 最近复制 → 普通条目完整保留）",
+                emptyFull.Count == 3
+                && emptyFull[0].Title == "置顶常用"
+                && emptyFull[1].Title == "血肉枪"
+                && emptyFull[2].Title == "标题精确", "");
+
+            chk("自定义动态目标替换 ApplyCustomTarget",
+                ApplyCustomTarget("!give {target} gun", "John Doe") == "!give \"John Doe\" gun"
+                && ApplyCustomTarget("!tp ^", "Alice") == "!tp Alice"
+                && ApplyCustomTarget("!give {target} gun", "") == "!give ^ gun", "");
+
+            chk("常用收藏键与备份清单包含 pins.txt",
+                MakePinKey("物品表", "血肉枪") == "物品表\u0001血肉枪"
+                && Array.IndexOf(BackupFileNames, "pins.txt") >= 0, "");
+
+            chk("命令面板半透明工具函数 Clamp 与预设轮换",
+                CommandPaletteForm.ClampOpacityPct(10) == 55
+                && CommandPaletteForm.ClampOpacityPct(120) == 100
+                && CommandPaletteForm.ClampOpacityPct(86) == 86
+                && CommandPaletteForm.NextOpacityPreset(86) == 74
+                && CommandPaletteForm.NextOpacityPreset(100) == 86, "");
+
+            var scrTest = new Rectangle(0, 0, 1920, 1080);
+            var rcC = CommandPaletteForm.ComputeDockBounds(scrTest, CommandPaletteForm.DockCenter);
+            var rcL = CommandPaletteForm.ComputeDockBounds(scrTest, CommandPaletteForm.DockLeft);
+            var rcR = CommandPaletteForm.ComputeDockBounds(scrTest, CommandPaletteForm.DockRight);
+            chk("命令面板三档弹出位置与抽屉尺寸计算",
+                CommandPaletteForm.NormalizeDockMode(99) == CommandPaletteForm.DockCenter
+                && CommandPaletteForm.NextDockMode(0) == 1
+                && CommandPaletteForm.NextDockMode(1) == 2
+                && CommandPaletteForm.NextDockMode(2) == 0
+                && CommandPaletteForm.DockModeLabel(0) == "居中"
+                && CommandPaletteForm.DockModeLabel(1) == "左侧"
+                && CommandPaletteForm.DockModeLabel(2) == "右侧"
+                && rcC.Width == 700 && rcC.Height == 470
+                && rcL.X == 12 && rcL.Width == 456 && rcL.Height >= 520 && rcL.Height <= 920
+                && rcR.Right == 1908 && rcR.Width == 456 && rcR.Height == rcL.Height, "");
+
+            var pyRobot = PinyinHelper.BuildTitle("机器人");
+            chk("智能拼音：全拼 / 首字母 / 混拼与防误搜边界对齐",
+                PinyinHelper.MatchScore(pyRobot, "jqr") > 0
+                && PinyinHelper.MatchScore(pyRobot, "jiqiren") > 0
+                && PinyinHelper.MatchScore(pyRobot, "jiqr") > 0
+                && PinyinHelper.MatchScore(pyRobot, "jiqir") > 0
+                && PinyinHelper.MatchScore(pyRobot, "jqir") > 0
+                && PinyinHelper.MatchScore(pyRobot, "jiqiren") > PinyinHelper.MatchScore(pyRobot, "jqr")
+                && PinyinHelper.MatchScore(pyRobot, "iq") == 0
+                && PinyinHelper.MatchScore(pyRobot, "ir") == 0
+                && PinyinHelper.MatchScore(pyRobot, "iren") == 0
+                && PinyinHelper.MatchScore(pyRobot, "jrn") == 0, "");
+
+            chk("智能拼音：GBK 二级字与游戏常用生僻字补全",
+                PinyinHelper.GetInitials("混沌分裂者") == "hdflz"
+                && PinyinHelper.MatchScore("混沌分裂者", "hdflz") > 0
+                && PinyinHelper.MatchScore("混沌分裂者", "hundun") > 0
+                && PinyinHelper.MatchScore("混沌分裂者", "hundunflz") > 0
+                && PinyinHelper.MatchScore("霰弹枪", "xdq") > 0
+                && PinyinHelper.MatchScore("霰弹枪", "xiandan") > 0
+                && PinyinHelper.MatchScore("霰弹枪", "xiandq") > 0
+                && PinyinHelper.MatchScore("手铐", "sk") > 0
+                && PinyinHelper.MatchScore("手铐", "shk") > 0
+                && PinyinHelper.MatchScore("手铐", "shoukao") > 0, "");
+
+            chk("智能拼音：多音字（重/血）与 lv/lu 别名支持",
+                PinyinHelper.MatchScore("重装", "zz") > 0
+                && PinyinHelper.MatchScore("重装", "zhongz") > 0
+                && PinyinHelper.MatchScore("重装", "cz") > 0
+                && PinyinHelper.MatchScore("重装", "chongz") > 0
+                && PinyinHelper.MatchScore("血肉枪", "xrq") > 0
+                && PinyinHelper.MatchScore("血肉枪", "xuerq") > 0
+                && PinyinHelper.MatchScore("血肉枪", "xuerouqiang") > 0
+                && PinyinHelper.MatchScore("血肉枪", "xierouqiang") > 0
+                && PinyinHelper.MatchScore("绿卡", "lvka") > 0
+                && PinyinHelper.MatchScore("绿卡", "luka") > 0
+                && PinyinHelper.MatchScore("绿卡", "lk") > 0, "");
+
+            var pyRankEntries = new List<PaletteEntry>();
+            pyRankEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("物品表", "暗黑步枪"),
+                SourceTab = "物品表", Title = "暗黑步枪", Body = "!give ^ ahbq", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("暗黑步枪"), TitlePinyin = PinyinHelper.BuildTitle("暗黑步枪"),
+                IsPinned = false, RecentOrder = -1
+            });
+            pyRankEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("物品表", "阿卡特突击步枪"),
+                SourceTab = "物品表", Title = "阿卡特突击步枪", Body = "!give ^ akt", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("阿卡特突击步枪"), TitlePinyin = PinyinHelper.BuildTitle("阿卡特突击步枪"),
+                IsPinned = false, RecentOrder = -1
+            });
+            pyRankEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("物品表", "AK47"),
+                SourceTab = "物品表", Title = "AK47", Body = "!give ^ ak47", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("AK47"), TitlePinyin = PinyinHelper.BuildTitle("AK47"),
+                IsPinned = false, RecentOrder = -1
+            });
+            pyRankEntries.Add(new PaletteEntry
+            {
+                PinKey = MakePinKey("物品表", "机器人"),
+                SourceTab = "物品表", Title = "机器人", Body = "!give ^ bot", Alt = "", Ulx = "", Note = "",
+                TitlePy = PinyinHelper.GetInitials("机器人"), TitlePinyin = PinyinHelper.BuildTitle("机器人"),
+                IsPinned = false, RecentOrder = -1
+            });
+            var rankAk = CommandPaletteForm.ScoreAndFilter(pyRankEntries, "ak", 10);
+            var rankJiqr = CommandPaletteForm.ScoreAndFilter(pyRankEntries, "jiqr", 10);
+            chk("智能拼音：英文标题优先于拼音模糊匹配且混拼命中精确条目",
+                rankAk.Count >= 1 && rankAk[0].Title == "AK47"
+                && rankJiqr.Count == 1 && rankJiqr[0].Title == "机器人", "");
 #endif
 
             try { Directory.Delete(tmpDir, true); } catch { }

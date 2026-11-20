@@ -18,7 +18,7 @@ using Windows.Storage.Streams;
 
 public partial class MainForm : Form
 {
-    public const string APP_VERSION = "V1.8.3";
+    public const string APP_VERSION = "V1.9.0";
 
     Overlay overlay;
     Toast toast;
@@ -27,8 +27,9 @@ public partial class MainForm : Form
     ComboBox cmbSpeed;
     ComboBox cmbStyle;
     ComboBox cmbColor;
-    NumericUpDown nThick, nLen, nGap, nDot;
+    NumericUpDown nThick, nLen, nGap, nDot, nCrossOutline, nCrossOpacity;
     CrosshairPreview crossPreview;
+    RxSegmentedControl segJoinMode;
     Button btnAuto;
     TabControl tabs;
 
@@ -44,8 +45,12 @@ public partial class MainForm : Form
     int toolSubIdx = 0;
 #endif
     Panel pTimerPanel, pTimerDiv1, pTimerDiv2;
+    TimelineCanvas timerTimeline;
+    CheckBox chkTimerCard;
     CountdownOverlay timerOverlay;
     bool timerRunning = false, timerPaused = false;
+    bool timerUseCard = false;
+    float timerPulseAlpha = 1.0f;
     DateTime timerEndAt = DateTime.MinValue, timerStartedAt = DateTime.MinValue;
     double timerPausedRemainMs = 0;
     long timerPausedElapsedMs = 0;
@@ -94,6 +99,8 @@ public partial class MainForm : Form
 
     int[] favCount = new int[0];
     string[] favName = new string[0];
+    string[] favMap = new string[0];
+    int[] favPing = new int[0];
     int[] favMax = new int[0];
     string favPath = "";
     // ===== 关于 / 自动更新 =====
@@ -104,13 +111,16 @@ public partial class MainForm : Form
     public const string UPDATE_URL_DEFAULT = "https://rx-tools.pages.dev/version.json";
     public const string APP_EDITION_SUFFIX = "";
 #endif
-    public const string APP_VERSION_NUM = "1.8.3";
+    public const string APP_VERSION_NUM = "1.9.0";
     public const string APP_BUILD_DATE = "2026-11-19";
     string updateUrl = UPDATE_URL_DEFAULT;
+#if ADMIN_EDITION
+    Control aboutPage, customPage, devPage;
+#else
     TabPage aboutPage, spacerPage, customPage;
+#endif
     string dataRootDir = "";
 #if ADMIN_EDITION
-    TabPage devPage;
     int dataUpdateMode = 0;   // 0 = 询问是否替换，1 = 自动替换未修改页，2 = 仅下载保存为 phrases.new.json
     ComboBox cmbDataUpdateMode;
     Label lblPendingDataState;
@@ -279,11 +289,27 @@ public partial class MainForm : Form
     bool srvSortAsc = true;
 
     // ===== 可自定义热键：索引 = id-1 =====
-    bool[] prevHkDown = new bool[8];
-    bool[] hkRegistered = new bool[12];   // 1..8 = 功能热键，9 = 热键总开关
-    bool hotkeysOff;                     // 用户临时关闭热键（F5 等交还系统）
-    DateTime lastHkRetry = DateTime.MinValue;
-    Button btnHotkeyOff;
+#if ADMIN_EDITION
+    const int HK_COUNT = 9;
+    static readonly int[] HKDefVk = { 0x74, 0x75, 0x76, 0x77, 0x7A, 0x78, 0x79, 0x78, 0x4B };
+    static readonly int[] HKDefMod = { 0, 0, 0, 0, 0x0002, 0, 0, 0x0002, 0x0001 };
+    static readonly string[] HKFunc = {
+        "准星 换样式", "挤服 开始/停止", "准星 换颜色", "准星 显示/隐藏", "退出工具",
+        "倒计时 开始/重置", "倒计时 显示/隐藏", "倒计时 暂停/继续", "全局命令面板"
+    };
+    static readonly string[] HKTip = {
+        "在 6 种准星样式之间循环",
+        "开始 / 停止挤服（按当前模式）",
+        "在 6 种颜色之间循环",
+        "把准星显示出来或收起来",
+        "直接关掉工具箱",
+        "按设定时长从头开始倒计时",
+        "显示或隐藏屏幕倒计时悬浮窗",
+        "暂停或继续当前倒计时",
+        "随时唤起全库拼音搜索与收藏命令面板（默认 Alt+K）"
+    };
+#else
+    const int HK_COUNT = 8;
     static readonly int[] HKDefVk = { 0x74, 0x75, 0x76, 0x77, 0x7A, 0x78, 0x79, 0x78 };
     static readonly int[] HKDefMod = { 0, 0, 0, 0, 0x0002, 0, 0, 0x0002 };
     static readonly string[] HKFunc = {
@@ -300,8 +326,14 @@ public partial class MainForm : Form
         "显示或隐藏屏幕倒计时悬浮窗",
         "暂停或继续当前倒计时"
     };
-    int[] hkVk = new int[8];
-    int[] hkMod = new int[8];
+#endif
+    bool[] prevHkDown = new bool[HK_COUNT];
+    bool[] hkRegistered = new bool[14];   // 1..HK_COUNT = 功能热键，HK_TOGGLE_ID = 热键总开关
+    bool hotkeysOff;                     // 用户临时关闭热键（F5 等交还系统）
+    DateTime lastHkRetry = DateTime.MinValue;
+    Button btnHotkeyOff;
+    int[] hkVk = new int[HK_COUNT];
+    int[] hkMod = new int[HK_COUNT];
     bool capturingKey = false;
     Button btnCross, btnColor, btnHotkey, bLog, btnCrossImg, btnCrossImgClear, btnCrossImgPaste;
     Label lblCrossImg;
@@ -380,7 +412,7 @@ public partial class MainForm : Form
             if (capturingKey) return;
             if (id == HK_TOGGLE_ID) { ToggleHotkeys(); return; }
             if (hotkeysOff) return;          // 已关闭：忽略其余热键（其实已注销，这里兜底）
-            if (id >= 1 && id <= 8) { HandleHotkey(id); return; }
+            if (id >= 1 && id <= HK_COUNT) { HandleHotkey(id); return; }
         }
         if (m.Msg == 0x001A && themeMode == 0)   // WM_SETTINGCHANGE（系统深浅色切换时联动）
         {
@@ -419,8 +451,13 @@ public partial class MainForm : Form
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
+#if ADMIN_EDITION
+        ClientSize = new Size(1080, 740);
+        MinimumSize = new Size(860, 580);
+#else
         ClientSize = new Size(960, 720);
         MinimumSize = new Size(820, 560);
+#endif
         Font = new Font("Microsoft YaHei UI", 9f);
         BackColor = Color.FromArgb(248, 250, 252);
 
@@ -433,7 +470,7 @@ public partial class MainForm : Form
         }
         catch { }
 
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < HK_COUNT; i++)
         {
             hkVk[i] = HKDefVk[i];
             hkMod[i] = HKDefMod[i];
@@ -455,6 +492,9 @@ public partial class MainForm : Form
         timerOverlay = new CountdownOverlay();
         toast = new Toast();
 
+#if ADMIN_EDITION
+        BuildAdminShell(tabTitles, tabItems);
+#else
         bottomBar = new Panel();
         bottomBar.Dock = DockStyle.Bottom;
         bottomBar.Height = 32;
@@ -504,39 +544,6 @@ public partial class MainForm : Form
         Controls.Add(tabs);
         Controls.Add(bottomBar);
 
-#if ADMIN_EDITION
-        if (tabTitles != null)
-        {
-            dataTabLabels = new string[tabTitles.Length];
-            dataTabLists = new List<string>[tabTitles.Length];
-            dataTabBase = new string[tabTitles.Length][];
-            var overrides = LoadDataOverrides();
-
-            for (int i = 0; i < tabTitles.Length; i++)
-            {
-                string[] items = (tabItems != null && i < tabItems.Length) ? tabItems[i] : null;
-                dataTabBase[i] = items ?? new string[0];
-                var list = new List<string>();
-                if (items != null) list.AddRange(items);
-
-                List<string> ov;
-                if (overrides.TryGetValue(tabTitles[i], out ov)) list = ov;
-
-                dataTabLabels[i] = tabTitles[i];
-                dataTabLists[i] = list;
-                tabs.TabPages.Add(BuildTextPage(tabTitles[i], list.ToArray(), i));
-            }
-        }
-        customPage = BuildCustomPage();
-        tabs.TabPages.Add(customPage);
-        tabs.TabPages.Add(BuildToolPage());
-        devPage = BuildDevPage();
-        aboutPage = BuildAboutPage();
-        spacerPage = new TabPage("");
-        tabs.TabPages.Add(spacerPage);          // 只占宽度，把右边两个顶到最右
-        if (devToolsOn) tabs.TabPages.Add(devPage);   // 开发者工具默认隐藏，在「关于」里开
-        tabs.TabPages.Add(aboutPage);
-#else
         BuildPlayerToolPages();
         customPage = BuildCustomPage();
         tabs.TabPages.Add(customPage);
@@ -544,18 +551,15 @@ public partial class MainForm : Form
         spacerPage = new TabPage("");
         tabs.TabPages.Add(spacerPage);          // 只占宽度，把「关于」推到最右侧
         tabs.TabPages.Add(aboutPage);
-#endif
+
         tabs.Selecting += delegate(object s2, TabControlCancelEventArgs e2)
         {
             if (e2.TabPage == spacerPage) e2.Cancel = true;   // 空白页不可选中
         };
         tabs.Resize += delegate { LayoutAboutTab(); };
-        // TabPage 在首次显示前拿到的尺寸不准，切到工具页时重排一次
         tabs.SelectedIndexChanged += delegate
         {
-#if !ADMIN_EDITION
             UpdatePlayerToolBar();
-#endif
             LayoutToolBar();
             if (pJoinPanel != null && pJoinPanel.Visible)
             {
@@ -566,10 +570,11 @@ public partial class MainForm : Form
                 try { LayoutTimer(); } catch { }
             }
         };
+#endif
 
         LoadSettings();
 #if ADMIN_EDITION
-        // 开发者工具默认隐藏；设置里开着才显示
+        if (navRail != null) navRail.SetCollapsed(navRailCollapsed);
         if (chkDevTools != null)
         {
             devToolsLoading = true;
@@ -579,27 +584,34 @@ public partial class MainForm : Form
         ApplyDevToolsTab(devToolsOn);
 #endif
         ApplyTheme();
-        // 设置里带着勾选偏好，读完重建列表（否则界面还是构造时默认的全选）
         FillSrvList();
         ApplyModeUi();
         UpdateHotkeyLabels();
         if (!string.IsNullOrEmpty(crossImgToLoad)) LoadCrosshairImage(crossImgToLoad, true);
-        // 构造期有控件抢焦点会让 TabControl 自己切换页签，这里强制回到首页
+
+        string startTab = Environment.GetEnvironmentVariable("RX_START_TAB");
+#if ADMIN_EDITION
+        if (!string.IsNullOrEmpty(startTab))
+        {
+            int si;
+            if (navPages.ContainsKey(startTab)) SwitchNavPage(startTab);
+            else if (int.TryParse(startTab, out si) && si >= 0 && si < dataTabLabels.Length)
+                SwitchNavPage("data:" + si);
+        }
+#else
         try
         {
-            if (tabs != null && tabs.TabPages.Count > 0
-                && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RX_START_TAB")))
+            if (tabs != null && tabs.TabPages.Count > 0 && string.IsNullOrEmpty(startTab))
                 tabs.SelectedIndex = 0;
         }
         catch { }
-
-        string startTab = Environment.GetEnvironmentVariable("RX_START_TAB");
         if (!string.IsNullOrEmpty(startTab))
         {
             int si;
             if (int.TryParse(startTab, out si) && si >= 0 && si < tabs.TabPages.Count)
                 tabs.SelectedIndex = si;
         }
+#endif
 
         tick = new System.Windows.Forms.Timer();
         tick.Interval = 20;
@@ -700,24 +712,17 @@ public partial class MainForm : Form
     // ===================== 工具页（挤服助手 + 屏幕准星） =====================
 
 #if ADMIN_EDITION
-    // 让"关于"贴在标签栏最右侧：中间插一个只有宽度的空白页
     void ApplyDevToolsTab(bool show)
     {
         try
         {
-            bool has = tabs.TabPages.Contains(devPage);
-            if (show && !has)
+            if (navRail != null)
             {
-                int idx = tabs.TabPages.IndexOf(aboutPage);
-                if (idx < 0) idx = tabs.TabPages.Count;
-                tabs.TabPages.Insert(idx, devPage);   // 插在「关于」前面，保持贴右
-                ThemeControlTree(devPage);
+                NavItem it = navRail.FindItem("dev");
+                if (it != null) it.Visible = show;
+                if (!show && activeNavKey == "dev") SwitchNavPage("about");
+                navRail.Invalidate();
             }
-            else if (!show && has)
-            {
-                tabs.TabPages.Remove(devPage);
-            }
-            LayoutAboutTab();
         }
         catch { }
     }
@@ -842,16 +847,19 @@ public partial class MainForm : Form
         Color darkBlue = Color.FromArgb(88, 166, 255);
         Color darkDivider = Color.FromArgb(48, 54, 61);
 
-        if (root is CrosshairPreview)
+        if (root is CrosshairPreview || root is WrapList || root is NavRail || root is RxSegmentedControl
+            || root is TimelineCanvas || root is StatusPillBar || root is CustomPhraseCard)
         {
             root.Invalidate();
             return;
         }
-        if (root is WrapList)
+#if ADMIN_EDITION
+        if (root == btnGlobalSearch)
         {
             root.Invalidate();
             return;
         }
+#endif
 
         Color ob, of;
         if (!origBack.TryGetValue(root, out ob)) { ob = root.BackColor; origBack[root] = ob; }
@@ -1075,16 +1083,31 @@ public partial class MainForm : Form
         IsDark = (themeMode == 1) || (themeMode == 0 && Native.IsSystemDarkMode());
         if (IsHandleCreated) Native.SetDarkTitleBar(Handle, IsDark);
 
-        BackColor = IsDark ? Color.FromArgb(13, 17, 23) : Color.FromArgb(241, 245, 249);
+        BackColor = ThemePalette.Canvas;
         if (bottomBar != null) bottomBar.BackColor = IsDark ? Color.FromArgb(28, 33, 40) : Color.FromArgb(241, 245, 249);
 
         ThemeControlTree(this);
 #if ADMIN_EDITION
-        if (devPage != null && devPage.Parent == null) ThemeControlTree(devPage);
+        if (adminRightHost != null) adminRightHost.BackColor = ThemePalette.Canvas;
+        if (headerBar != null)
+        {
+            headerBar.BackColor = ThemePalette.Surface;
+            headerBar.Invalidate();
+        }
+        if (lblHeaderTitle != null) lblHeaderTitle.ForeColor = ThemePalette.TextPrimary;
+        if (lblHeaderSub != null) lblHeaderSub.ForeColor = ThemePalette.TextMuted;
+        if (pageHost != null) pageHost.BackColor = ThemePalette.Surface;
+        if (navRail != null) navRail.Invalidate();
+        if (statusPillBar != null) statusPillBar.Invalidate();
+        if (btnGlobalSearch != null) btnGlobalSearch.Invalidate();
+        if (favWrapList != null) favWrapList.Invalidate();
+        if (favSegMode != null) favSegMode.Invalidate();
         ApplyToolSubTabStyle();
 #else
         UpdatePlayerToolBar();
 #endif
+        if (segJoinMode != null) segJoinMode.Invalidate();
+        if (timerTimeline != null) timerTimeline.Invalidate();
 
         UpdateStartButton();
         UpdateHotkeyToggleButton();
@@ -1257,8 +1280,7 @@ public partial class MainForm : Form
             else
             {
                 overlay.Visible = true;
-                Native.MakeTopmost(overlay.Handle);
-                Native.CenterPhysical(overlay.Handle);
+                overlay.CenterAndRedraw();
                 toast.ShowText("准星：开启");
                 Native.Log("cross show");
             }
@@ -1315,19 +1337,26 @@ public partial class MainForm : Form
             toast.HideIfPersistent();
         }
 
-        string ocr = (chkOcr == null || chkOcr.Checked) ? "OCR开" : "OCR关";
-        lblStatus.Text = string.Format("准星：{0} ({1})　|　挤服：{2} [{3} · {4} · {5}ms]　|　{6}　|　热键{7}　|　已发送 {8} 次",
-            overlay.Visible ? "开启" : "关闭",
-            Overlay.Styles[overlay.StyleIndex],
-            run, modeName, tg, IntervalMs, ocr,
-            hotkeysOff ? "关(" + ToggleKeyName() + "开)"
-                : (HotkeysOk() ? "开" : "冲突"), sent);
+#if ADMIN_EDITION
+        UpdateAdminStatusPills();
+        UpdateHeaderBar();
+#else
+        if (lblStatus != null)
+        {
+            string ocr = (chkOcr == null || chkOcr.Checked) ? "OCR开" : "OCR关";
+            lblStatus.Text = string.Format("准星：{0} ({1})　|　挤服：{2} [{3} · {4} · {5}ms]　|　{6}　|　热键{7}　|　已发送 {8} 次",
+                overlay.Visible ? "开启" : "关闭",
+                Overlay.Styles[overlay.StyleIndex],
+                run, modeName, tg, IntervalMs, ocr,
+                hotkeysOff ? "关(" + ToggleKeyName() + "开)"
+                    : (HotkeysOk() ? "开" : "冲突"), sent);
+        }
+#endif
     }
 
     void OnTick(object sender, EventArgs e)
     {
-        // 窗口/面板尺寸变了就重排（构造期布局用的是临时尺寸，常常对不上）
-        if (pJoinPanel != null && !isClosing
+        if (pJoinPanel != null && pJoinPanel.Visible && !isClosing
             && (pJoinPanel.ClientSize.Width != laidW || pJoinPanel.ClientSize.Height != laidH))
             LayoutJoin();
 
@@ -1348,15 +1377,11 @@ public partial class MainForm : Form
             }
         }
 
-        if (pJoinPanel != null && !isClosing
-            && (pJoinPanel.ClientSize.Width != laidW || pJoinPanel.ClientSize.Height != laidH))
-            LayoutJoin();
-
         // 注册失败时每 5 秒重试一次（可能被别的程序临时占用）
         if (!hotkeysOff && !capturingKey && (DateTime.Now - lastHkRetry).TotalSeconds > 5)
         {
             bool missing = false;
-            for (int i = 1; i <= 8; i++) if (!hkRegistered[i]) { missing = true; break; }
+            for (int i = 1; i <= HK_COUNT; i++) if (!hkRegistered[i]) { missing = true; break; }
             if (missing)
             {
                 lastHkRetry = DateTime.Now;
@@ -1366,13 +1391,15 @@ public partial class MainForm : Form
         }
 
         // 动态热键轮询兜底（抓键弹窗期间严禁触发；用户关掉热键时也不许轮询）
+        bool anyUnreg = false;
         if (!capturingKey && !hotkeysOff)
         {
-            for (int hi = 0; hi < 8; hi++)
+            for (int hi = 0; hi < HK_COUNT; hi++)
             {
                 int id = hi + 1;
                 if (!hkRegistered[id])
                 {
+                    anyUnreg = true;
                     bool down = IsHotkeyDown(hkVk[hi], hkMod[hi]);
                     if (down && !prevHkDown[hi])
                     {
@@ -1405,6 +1432,7 @@ public partial class MainForm : Form
                 timerPaused = false;
                 timerRemainSec = 0;
                 timerFlashDim = false;
+                timerPulseAlpha = 1.0f;
                 EvaluateCurrentTimeline();
                 SyncTimerOverlay(false);
                 UpdateTimerButtonsStyle();
@@ -1419,30 +1447,34 @@ public partial class MainForm : Form
                     EvaluateCurrentTimeline();
                 }
                 bool wantDim = false;
-                if (timerActiveFlash == 1)
+                float wantPulse = 1.0f;
+                if (timerActiveFlash > 0)
                 {
-                    long elapsedMs = (long)(DateTime.Now - timerStartedAt).TotalMilliseconds;
-                    if (elapsedMs >= 0) wantDim = ((elapsedMs % 2000) >= 1500);
+                    double periodMs = (timerActiveFlash == 3) ? 360.0 : ((timerActiveFlash == 2) ? 900.0 : 2000.0);
+                    double elapsedMs = Math.Max(0.0, (DateTime.Now - timerStartedAt).TotalMilliseconds);
+                    double phase = (elapsedMs % periodMs) / periodMs;
+                    // 平滑正弦呼吸脉冲：0.30..1.00
+                    wantPulse = (float)(0.65 + 0.35 * Math.Cos(phase * Math.PI * 2.0));
+                    wantDim = (wantPulse < 0.55f);
                 }
-                else if (timerActiveFlash == 2 || timerActiveFlash == 3)
+                bool pulseChanged = (Math.Abs(wantPulse - timerPulseAlpha) >= 0.008f) || (wantDim != timerFlashDim);
+                if (secChanged || pulseChanged)
                 {
-                    int halfMs = (timerActiveFlash == 3) ? 180 : 450;
-                    long elapsedMs = (long)(DateTime.Now - timerStartedAt).TotalMilliseconds;
-                    if (elapsedMs >= 0) wantDim = ((elapsedMs / halfMs) % 2) == 1;
+                    timerFlashDim = wantDim;
+                    timerPulseAlpha = wantPulse;
                 }
-                bool flashChanged = (wantDim != timerFlashDim);
-                timerFlashDim = wantDim;
 
                 if (secChanged)
                 {
                     SyncTimerOverlay(false);
                     UpdateTimerUi();
                 }
-                else if (flashChanged)
+                else if (pulseChanged)
                 {
                     if (timerOverlay != null)
                     {
                         timerOverlay.FlashDim = timerFlashDim;
+                        timerOverlay.PulseAlpha = timerPulseAlpha;
                         timerOverlay.Invalidate();
                     }
                     UpdateTimerFlashPreview();
@@ -1466,9 +1498,16 @@ public partial class MainForm : Form
             if (boostDue || (now - lastOverlayTopmost).TotalSeconds >= 2.0)
             {
                 lastOverlayTopmost = now;
-                if (needOverlay) { try { Native.MakeTopmost(overlay.Handle); } catch { } }
+                if (needOverlay) { try { overlay.CenterAndRedraw(); } catch { } }
                 if (needTimer) { try { Native.MakeTopmost(timerOverlay.Handle); } catch { } }
             }
+        }
+
+        // 动态节能频率：空闲时 160ms，有活动挤服/倒计时/悬浮窗/轮询热键时保持 20ms 高响应
+        if (tick != null)
+        {
+            int wantInterval = (autoOn || timerRunning || needOverlay || needTimer || anyUnreg) ? 20 : 160;
+            if (tick.Interval != wantInterval) tick.Interval = wantInterval;
         }
 
         if (autoOn)
@@ -1648,7 +1687,7 @@ public partial class MainForm : Form
                 StopActiveJoin(null, "close: stop active join");
         }
         catch { }
-        for (int id = 1; id <= 8; id++)
+        for (int id = 1; id <= HK_COUNT; id++)
         {
             try { if (hkRegistered[id]) Native.UnregisterHotKey(Handle, id); } catch { }
         }

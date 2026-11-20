@@ -581,22 +581,26 @@ public partial class MainForm
     {
         try
         {
-            int tabIdx = index;
-            if (tabIdx < 0 || tabIdx >= tabs.TabPages.Count) return;
-            int prevSel = tabs.SelectedIndex;
-            var old = tabs.TabPages[tabIdx];
-            tabs.TabPages.Remove(old);
-            ForgetOrigColors(old);
-            old.Dispose();
-            tabs.TabPages.Insert(tabIdx, BuildTextPage(dataTabLabels[index], dataTabLists[index].ToArray(), index));
-            ThemeControlTree(tabs.TabPages[tabIdx]);
-            if (selectAfter) tabs.SelectedIndex = tabIdx;
-            else if (prevSel >= 0 && prevSel < tabs.TabPages.Count) tabs.SelectedIndex = prevSel;
+            if (index < 0 || index >= dataTabLabels.Length) return;
+            string key = "data:" + index;
+            bool wasActive = (activeNavKey == key);
+            Control old;
+            if (navPages.TryGetValue(key, out old) && old != null)
+            {
+                if (old.Parent != null) old.Parent.Controls.Remove(old);
+                ForgetOrigColors(old);
+                old.Dispose();
+            }
+            Panel fresh = BuildTextPage(dataTabLabels[index], dataTabLists[index].ToArray(), index);
+            RegisterNavPage(key, dataTabLabels[index], "指令库", IconForDataTab(dataTabLabels[index]), CountDataCommands(dataTabLists[index]), fresh);
+            ThemeControlTree(fresh);
+            if (selectAfter || wasActive) SwitchNavPage(key);
+            UpdateNavBadges();
         }
         catch (Exception ex) { Native.Log("rebuild data page fail: " + ex.Message); }
     }
 
-    TabPage BuildTextPage(string label, string[] items, int pageIndex)
+    Panel BuildTextPage(string label, string[] items, int pageIndex)
     {
         int total = (items == null) ? 0 : items.Length;
         string[] titles = new string[total];
@@ -639,37 +643,143 @@ public partial class MainForm
         }
         hasUlx = (nUlx > 0);
 
-        var page = new TabPage(cmdCount > 0 ? label + " (" + cmdCount + ")" : label);
+        var page = new Panel();
+        page.Text = cmdCount > 0 ? label + " (" + cmdCount + ")" : label;
         page.Padding = new Padding(0);
         page.BackColor = Color.White;
 
         int mode = 0;   // 0 = 主命令，1 = alt 命令，2 = ulx
-        RadioButton rbMain = null, rbAlt = null, rbUlx = null;
+        bool isJobPage = IsRolePage(label);
+        bool hasModes = hasAlt || hasUlx;
 
-        var top = new Panel();
-        top.Dock = DockStyle.Top;
-        top.Height = 124;
-        top.Padding = new Padding(8, 8, 8, 6);
-        top.BackColor = Color.FromArgb(247, 249, 252);
-        top.Paint += delegate(object snd, PaintEventArgs pe)
+        // ---------- 1. 顶部单行 46px 精致工具栏（释放近 45% 首屏列表高度） ----------
+        var toolStrip = new Panel();
+        toolStrip.Dock = DockStyle.Top;
+        toolStrip.Height = 46;
+        toolStrip.BackColor = ThemePalette.SurfaceAlt;
+        toolStrip.Paint += delegate(object snd, PaintEventArgs pe)
         {
-            using (var pen = new Pen(IsDark ? Color.FromArgb(48, 54, 61) : Color.FromArgb(226, 232, 240)))
-                pe.Graphics.DrawLine(pen, 0, top.Height - 1, top.Width, top.Height - 1);
+            using (var pen = new Pen(ThemePalette.BorderSubtle, 1f))
+                pe.Graphics.DrawLine(pen, 0, toolStrip.Height - 1, toolStrip.Width, toolStrip.Height - 1);
         };
 
-        const string EmptyPreviewHint = "💡 选中或单击下方任意条目即可自动复制指令，并在此预览完整多行文本（支持鼠标划选局部复制）";
+        RxSegmentedControl segMode = null;
+        int[] segModeMap = new int[0];
+        if (hasModes)
+        {
+            var segLabels = new List<string>();
+            var segVals = new List<int>();
+            segLabels.Add(isJobPage ? "常规生成" : "主指令");
+            segVals.Add(0);
+            if (isJobPage && hasAlt)
+            {
+                segLabels.Add("原地替换");
+                segVals.Add(1);
+            }
+            if (hasUlx)
+            {
+                segLabels.Add("控制台 ulx");
+                segVals.Add(2);
+            }
+            segModeMap = segVals.ToArray();
+            segMode = new RxSegmentedControl();
+            segMode.Items = segLabels.ToArray();
+            segMode.SetBounds(10, 8, segLabels.Count == 3 ? 256 : 182, 30);
+            toolStrip.Controls.Add(segMode);
+        }
+
+        var box = new TextBox();
+        box.Font = TrackFont("Microsoft YaHei UI", 9.2f, FontStyle.Regular);
+        box.HandleCreated += delegate { try { Native.SetCueBanner(box.Handle, "筛选本页关键词（空格多词，Esc 清空）"); } catch { } };
+        toolStrip.Controls.Add(box);
+
+        var btnClearSearch = new Button();
+        btnClearSearch.Text = "×";
+        btnClearSearch.FlatStyle = FlatStyle.Flat;
+        btnClearSearch.FlatAppearance.BorderColor = Color.Silver;
+        btnClearSearch.ForeColor = Color.DimGray;
+        btnClearSearch.Visible = false;
+        toolStrip.Controls.Add(btnClearSearch);
+
+        var lblMatchCount = new Label();
+        lblMatchCount.ForeColor = Color.Gray;
+        lblMatchCount.Font = TrackFont("Microsoft YaHei UI", 8.4f, FontStyle.Regular);
+        lblMatchCount.TextAlign = ContentAlignment.MiddleLeft;
+        lblMatchCount.AutoEllipsis = true;
+        toolStrip.Controls.Add(lblMatchCount);
+
+        var btnEditItems = new Button();
+        btnEditItems.Text = "编辑条目";
+        btnEditItems.BackColor = Color.FromArgb(232, 240, 252);
+        btnEditItems.ForeColor = Color.FromArgb(24, 64, 128);
+        btnEditItems.FlatStyle = FlatStyle.Flat;
+        btnEditItems.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
+        int idxForEdit = pageIndex;
+        btnEditItems.Click += delegate { EditDataTab(idxForEdit); };
+        toolStrip.Controls.Add(btnEditItems);
+
+        var btnToggleFold = new Button();
+        btnToggleFold.Text = "全部展开";
+        btnToggleFold.FlatStyle = FlatStyle.Flat;
+        btnToggleFold.FlatAppearance.BorderColor = Color.Silver;
+        btnToggleFold.ForeColor = Color.FromArgb(40, 70, 120);
+        btnToggleFold.BackColor = Color.FromArgb(232, 240, 252);
+        btnToggleFold.Enabled = false;
+        toolStrip.Controls.Add(btnToggleFold);
+
+        var btnCats = new Button();
+        btnCats.Text = "分类 ▾";
+        btnCats.FlatStyle = FlatStyle.Flat;
+        btnCats.FlatAppearance.BorderColor = Color.Silver;
+        btnCats.ForeColor = Color.FromArgb(40, 70, 120);
+        btnCats.BackColor = Color.FromArgb(232, 240, 252);
+        btnCats.Enabled = false;
+        toolStrip.Controls.Add(btnCats);
+
+        Action layoutStrip = delegate
+        {
+            int w = toolStrip.ClientSize.Width;
+            if (w < 300) return;
+            int rx = w - 10;
+            btnCats.SetBounds(rx - 68, 9, 68, 28); rx -= 74;
+            btnToggleFold.SetBounds(rx - 78, 9, 78, 28); rx -= 84;
+            btnEditItems.SetBounds(rx - 78, 9, 78, 28); rx -= 86;
+
+            int lx = (segMode != null) ? (segMode.Right + 10) : 10;
+            int avail = rx - lx;
+            int boxW = Math.Max(120, Math.Min(230, avail - 92));
+            box.SetBounds(lx, 10, boxW, 25);
+            btnClearSearch.SetBounds(box.Right + 2, 10, 24, 25);
+            int mx = btnClearSearch.Visible ? (btnClearSearch.Right + 6) : (box.Right + 8);
+            lblMatchCount.SetBounds(mx, 12, Math.Max(30, rx - mx), 22);
+        };
+        toolStrip.Resize += delegate { layoutStrip(); };
+
+        // ---------- 2. 底部 44px 紧凑命令预览抽屉（支持一键展开多行与快捷复制） ----------
+        bool previewExpanded = false;
+        const string EmptyPreviewHint = "💡 单击任意条目即复制并在此显示完整命令 · 点行首 ★ 可收藏 · Alt+K 跨全库瞬搜";
+
+        var previewBar = new Panel();
+        previewBar.Dock = DockStyle.Bottom;
+        previewBar.Height = 44;
+        previewBar.BackColor = ThemePalette.SurfaceAlt;
+        previewBar.Paint += delegate(object snd, PaintEventArgs pe)
+        {
+            using (var pen = new Pen(ThemePalette.BorderSubtle, 1f))
+                pe.Graphics.DrawLine(pen, 0, 0, previewBar.Width, 0);
+        };
 
         var preview = new TextBox();
         preview.Tag = "rx-preview";
-        preview.Dock = DockStyle.Fill;
         preview.Multiline = true;
         preview.ReadOnly = true;
-        preview.ScrollBars = ScrollBars.Vertical;
+        preview.ScrollBars = ScrollBars.None;
         preview.BorderStyle = BorderStyle.FixedSingle;
         preview.BackColor = Color.White;
         preview.ForeColor = Color.FromArgb(140, 150, 165);
         preview.Text = EmptyPreviewHint;
-        preview.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
+        preview.Font = TrackFont("Consolas", 9.2f, FontStyle.Regular);
+        previewBar.Controls.Add(preview);
 
         var prevMenu = new ContextMenuStrip(uiComponents);
         var miCopySel = new ToolStripMenuItem("复制选中");
@@ -680,195 +790,48 @@ public partial class MainForm
         prevMenu.Items.Add(miSelAll);
         preview.ContextMenuStrip = prevMenu;
 
-        top.Controls.Add(preview);
+        var btnPrevCopy = new Button();
+        btnPrevCopy.Text = "复制";
+        btnPrevCopy.BackColor = Color.FromArgb(232, 240, 252);
+        btnPrevCopy.ForeColor = Color.FromArgb(24, 64, 128);
+        btnPrevCopy.FlatStyle = FlatStyle.Flat;
+        btnPrevCopy.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
+        previewBar.Controls.Add(btnPrevCopy);
 
-        var searchPanel = new Panel();
-        searchPanel.Dock = DockStyle.Right;
-        searchPanel.Width = 256;
-        searchPanel.Padding = new Padding(6, 0, 0, 0);
+        var btnPrevExpand = new Button();
+        btnPrevExpand.Text = "展开";
+        btnPrevExpand.FlatStyle = FlatStyle.Flat;
+        btnPrevExpand.FlatAppearance.BorderColor = Color.Silver;
+        previewBar.Controls.Add(btnPrevExpand);
 
-        var lblSearch = new Label();
-        lblSearch.Text = "筛选关键词（空格多词，Esc清空）：";
-        lblSearch.SetBounds(6, 0, 240, 18);
-        lblSearch.ForeColor = Color.FromArgb(90, 100, 114);
-        searchPanel.Controls.Add(lblSearch);
-
-        var box = new TextBox();
-        box.SetBounds(6, 20, 206, 26);
-        box.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
-        searchPanel.Controls.Add(box);
-
-        var btnClearSearch = new Button();
-        btnClearSearch.Text = "×";
-        btnClearSearch.SetBounds(214, 19, 32, 26);
-        btnClearSearch.FlatStyle = FlatStyle.Flat;
-        btnClearSearch.FlatAppearance.BorderColor = Color.Silver;
-        btnClearSearch.ForeColor = Color.DimGray;
-        btnClearSearch.Visible = false;
-        searchPanel.Controls.Add(btnClearSearch);
-
-        var lblMatchCount = new Label();
-        lblMatchCount.SetBounds(6, 50, 240, 20);
-        lblMatchCount.ForeColor = Color.Gray;
-        searchPanel.Controls.Add(lblMatchCount);
-
-        var btnCats = new Button();
-        btnCats.Text = "分类 ▾";
-        btnCats.SetBounds(176, 74, 70, 28);
-        btnCats.FlatStyle = FlatStyle.Flat;
-        btnCats.FlatAppearance.BorderColor = Color.Silver;
-        btnCats.ForeColor = Color.FromArgb(40, 70, 120);
-        btnCats.BackColor = Color.FromArgb(232, 240, 252);
-        btnCats.Enabled = false;          // 有分组时才可用
-        searchPanel.Controls.Add(btnCats);
-
-        var btnToggleFold = new Button();
-        btnToggleFold.Text = "全部展开";
-        btnToggleFold.SetBounds(92, 74, 80, 28);
-        btnToggleFold.FlatStyle = FlatStyle.Flat;
-        btnToggleFold.FlatAppearance.BorderColor = Color.Silver;
-        btnToggleFold.ForeColor = Color.FromArgb(40, 70, 120);
-        btnToggleFold.BackColor = Color.FromArgb(232, 240, 252);
-        btnToggleFold.Enabled = false;
-        searchPanel.Controls.Add(btnToggleFold);
-
-        var btnEditItems = new Button();
-        btnEditItems.Text = "编辑条目";
-        btnEditItems.SetBounds(6, 74, 82, 28);
-        btnEditItems.BackColor = Color.FromArgb(232, 240, 252);
-        btnEditItems.ForeColor = Color.FromArgb(24, 64, 128);
-        btnEditItems.FlatStyle = FlatStyle.Flat;
-        btnEditItems.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
-        int idxForEdit = pageIndex;
-        btnEditItems.Click += delegate { EditDataTab(idxForEdit); };
-        searchPanel.Controls.Add(btnEditItems);
-
-        top.Controls.Add(searchPanel);
-        page.Controls.Add(top);
-
-        TextBox idBox = null;
-        bool hasModes = hasAlt || hasUlx;
+        Action layoutPreviewBar = delegate
         {
-            var bar = new Panel();
-            bar.Dock = DockStyle.Top;
-            bar.Height = hasModes ? 68 : 36;           // 有写法切换才需要两行
-            bar.Padding = new Padding(8, 4, 8, 2);
-            bar.BackColor = Color.FromArgb(242, 246, 252);
-            bar.Paint += delegate(object snd, PaintEventArgs pe)
-            {
-                using (var pen = new Pen(IsDark ? Color.FromArgb(48, 54, 61) : Color.FromArgb(226, 232, 240)))
-                    pe.Graphics.DrawLine(pen, 0, bar.Height - 1, bar.Width, bar.Height - 1);
-            };
+            int w = previewBar.ClientSize.Width;
+            int h = previewBar.ClientSize.Height;
+            if (w < 200) return;
+            btnPrevExpand.SetBounds(w - 64, 8, 54, 28);
+            btnPrevCopy.SetBounds(btnPrevExpand.Left - 66, 8, 60, 28);
+            preview.SetBounds(10, 7, Math.Max(100, btnPrevCopy.Left - 18), Math.Max(28, h - 14));
+        };
+        previewBar.Resize += delegate { layoutPreviewBar(); };
+        btnPrevExpand.Click += delegate
+        {
+            previewExpanded = !previewExpanded;
+            previewBar.Height = previewExpanded ? 124 : 44;
+            preview.ScrollBars = previewExpanded ? ScrollBars.Vertical : ScrollBars.None;
+            btnPrevExpand.Text = previewExpanded ? "收起" : "展开";
+            layoutPreviewBar();
+        };
 
-            if (hasModes)
-            {
-                bool isJobPage = IsRolePage(label);
-
-                rbMain = new RadioButton();
-                rbMain.Text = isJobPage ? "常规生成 (forcespawn)" : "主指令";
-                rbMain.SetBounds(8, 4, 186, 26);     // 不能用 Dock.Left：会占满整行高度，把 ID 框盖住
-                rbMain.Checked = true;
-                bar.Controls.Add(rbMain);
-
-                // 备用档只属于角色页；其它页面把不同写法直接列成独立条目，这里不再给选项
-                int ulxX = 458;
-                if (isJobPage)
-                {
-                    rbAlt = new RadioButton();
-                    rbAlt.Text = "原地替换 (devforcespawn" + (nAlt > 0 ? " · " + nAlt + " 条" : "") + ")";
-                    rbAlt.SetBounds(198, 4, 252, 26);      // 放宽，避免"…· 153 条)"被裁掉
-                    rbAlt.Visible = hasAlt;
-                    bar.Controls.Add(rbAlt);
-                }
-                else
-                {
-                    ulxX = 198;
-                }
-
-                rbUlx = new RadioButton();
-                rbUlx.Text = "控制台 ulx" + (nUlx > 0 ? " · " + nUlx + " 条" : "") + (nUlx == 0 ? "（本页无）" : "");
-                rbUlx.SetBounds(ulxX, 4, 176, 26);      // 放得下「控制台 ulx · 870 条」
-                rbUlx.Visible = hasUlx;
-                bar.Controls.Add(rbUlx);
-
-                var lblAltTip = new Label();
-                lblAltTip.Text = hasUlx
-                    ? "⚠ ulx 走游戏控制台（~）；主指令走聊天框"
-                    : "⚠ 部分角色只能用 devforcespawn 或 ulx 指令刷新，以实测为准";
-                int tipX = isJobPage ? (hasUlx ? 642 : 470) : (hasUlx ? 382 : 210);
-                lblAltTip.SetBounds(tipX, 4, 300, 26);     // 和单选按钮同一行，省一整行高度
-                lblAltTip.TextAlign = ContentAlignment.MiddleLeft;
-                lblAltTip.ForeColor = Color.FromArgb(176, 92, 0);
-                lblAltTip.Font = TrackFont("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
-                lblAltTip.UseMnemonic = false;
-                lblAltTip.AutoSize = false;
-                lblAltTip.AutoEllipsis = true;   // 宽度不够时显示省略号，不再硬切成半截
-                bar.Controls.Add(lblAltTip);
-                // 窗口够宽：提示和单选按钮同一行；太窄：挪到下面单独一行
-                int tipBaseH = bar.Height;   // 68
-                Action applyTipLayout = delegate
-                {
-                    int barW = bar.Width;
-                    if (barW <= 0) return;
-                    int avail = barW - tipX - 12;
-                    int need = TextRenderer.MeasureText(lblAltTip.Text, lblAltTip.Font).Width + 8;
-                    bool drop = avail < need;
-                    if (drop)
-                    {
-                        int y = 66;
-                        if (bar.Height != tipBaseH + 28) bar.Height = tipBaseH + 28;
-                        if (lblAltTip.Top != y || lblAltTip.Left != 8)
-                            lblAltTip.SetBounds(8, y, Math.Max(240, barW - 20), 22);
-                        else
-                            lblAltTip.Width = Math.Max(240, barW - 20);
-                    }
-                    else
-                    {
-                        if (bar.Height != tipBaseH) bar.Height = tipBaseH;
-                        if (lblAltTip.Top != 4 || lblAltTip.Left != tipX)
-                            lblAltTip.SetBounds(tipX, 4, Math.Max(120, avail), 26);
-                        else
-                            lblAltTip.Width = Math.Max(120, avail);
-                    }
-                };
-                bar.Resize += delegate { applyTipLayout(); };
-                bar.Paint += delegate { applyTipLayout(); };   // 首次布局/尺寸变化后补一次
-                bar.HandleCreated += delegate
-                {
-                    try { BeginInvoke((MethodInvoker)delegate { applyTipLayout(); }); } catch { }
-                };
-            }
-
-            int idY = hasModes ? 36 : 4;
-
-            var lblId = new Label();
-            lblId.Text = "目标 ID：";
-            lblId.SetBounds(8, idY + 3, 74, 22);
-            lblId.ForeColor = Color.FromArgb(60, 80, 110);
-            bar.Controls.Add(lblId);
-
-            idBox = new TextBox();
-            idBox.SetBounds(84, idY, 86, 24);
-            try { Native.SetCueBanner(idBox.Handle, "玩家游戏名"); } catch { }
-            idBox.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
-            bar.Controls.Add(idBox);
-
-            var lblIdTip = new Label();
-            lblIdTip.Text = "留空 = 用 ^（只对自己生效）；填玩家名自动替换 ^（名字带空格会自动加引号）";
-            lblIdTip.SetBounds(180, idY + 3, 760, 22);
-            lblIdTip.ForeColor = Color.FromArgb(110, 120, 135);
-            lblIdTip.Font = TrackFont("Microsoft YaHei UI", 9f, FontStyle.Regular);
-            bar.Controls.Add(lblIdTip);
-
-            page.Controls.Add(bar);
-            bar.BringToFront();
-        }
-
+        // ---------- 3. 主指令列表（占据首屏绝大部分空间） ----------
         var list = new WrapList();
         list.Dock = DockStyle.Fill;
         list.DefaultCollapsed = true;
         list.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
+
         page.Controls.Add(list);
+        page.Controls.Add(toolStrip);
+        page.Controls.Add(previewBar);
         list.BringToFront();
 
         int[] shown = new int[total];
@@ -887,10 +850,9 @@ public partial class MainForm
             {
                 if (!string.IsNullOrEmpty(ulxs[i])) raw = ulxs[i];
                 else if (ulxAuto && raw.Length > 1 && raw[0] == '!')
-                    raw = "ulx " + UlxName(raw.Substring(1));  // !xxx → ulx xxx（带下划线的例外见 UlxName）
+                    raw = "ulx " + UlxName(raw.Substring(1));
             }
-            if (idBox != null) raw = ApplyTargetName(raw, idBox.Text);
-            return raw;
+            return ApplyTargetName(raw, globalTargetName);
         };
 
         Action<string> setPreviewContent = delegate(string content)
@@ -903,24 +865,30 @@ public partial class MainForm
             else
             {
                 preview.ForeColor = IsDark ? Color.FromArgb(230, 237, 243) : Color.FromArgb(20, 28, 40);
-                preview.Text = content.Replace("\r\n", "\n").Replace("\n", "\r\n");
+                string norm = content.Replace("\r\n", "\n").Replace("\n", "\r\n");
+                preview.Text = norm;
                 preview.Select(0, 0);
+                // 若选中了多行内容，自动展开预览栏方便阅读
+                if (norm.IndexOf('\n') >= 0 && !previewExpanded)
+                {
+                    previewExpanded = true;
+                    previewBar.Height = 112;
+                    preview.ScrollBars = ScrollBars.Vertical;
+                    btnPrevExpand.Text = "收起";
+                    layoutPreviewBar();
+                }
             }
         };
 
-        Action fitPreview = delegate
+        btnPrevCopy.Click += delegate
         {
-            int w = preview.ClientSize.Width - 16;
-            if (w < 80) w = 80;
-            string txt = (string.IsNullOrEmpty(preview.Text) || preview.Text == EmptyPreviewHint) ? " " : preview.Text;
-            Size sz = TextRenderer.MeasureText(txt, preview.Font, new Size(w, int.MaxValue),
-                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
-            int h = sz.Height + 22;
-            if (h < 124) h = 124;
-            if (h > 240) h = 240;
-            if (top.Height != h) top.Height = h;
+            int k = list.Sel;
+            if (k >= 0 && k < shownN && !vHeads[k])
+            {
+                CopyToClipboard(vLabels[k], vValues[k]);
+                RecordRecentCopy(label, vLabels[k]);
+            }
         };
-        preview.Resize += delegate { fitPreview(); };
 
         Action syncFoldBtn = delegate
         {
@@ -934,6 +902,17 @@ public partial class MainForm
             if (!list.HasCollapsible()) return;
             list.SetAllCollapsed(!list.AreAllCollapsed());
             list.Focus();
+        };
+
+        list.IsRowPinned = delegate(int k)
+        {
+            if (k < 0 || k >= vLabels.Length || vHeads[k]) return false;
+            return IsPinnedKey(MakePinKey(label, vLabels[k]));
+        };
+        list.ItemPinToggled += delegate(int k)
+        {
+            if (k < 0 || k >= vLabels.Length || vHeads[k]) return;
+            TogglePinKey(MakePinKey(label, vLabels[k]), vLabels[k]);
         };
 
         Action rebuildView = delegate
@@ -952,7 +931,7 @@ public partial class MainForm
                 vNotes[k] = notes[i];
                 vHeads[k] = isHead[i];
             }
-            int keepScroll = list.ScrollTop;   // 切写法/筛选时不要跳回顶部
+            int keepScroll = list.ScrollTop;
             int keepSelect = list.Sel;
             list.SetData(vLabels, vValues, vHeads, vNotes);
             list.ScrollTop = keepScroll;
@@ -963,7 +942,16 @@ public partial class MainForm
             for (int k = 0; k < shownN; k++) { if (vHeads[k]) { anyHead = true; break; } }
             btnCats.Enabled = anyHead;
             syncFoldBtn();
+            if (list.Sel >= 0 && list.Sel < shownN && !vHeads[list.Sel])
+            {
+                string pv = vValues[list.Sel];
+                if (!string.IsNullOrEmpty(vNotes[list.Sel])) pv = pv + Environment.NewLine + vNotes[list.Sel];
+                setPreviewContent(pv);
+            }
         };
+
+        // 注册全局目标玩家名联动回调
+        dataTargetSyncCallbacks[pageIndex] = delegate { rebuildView(); };
 
         Action<string> applyFilter = delegate(string q)
         {
@@ -987,7 +975,8 @@ public partial class MainForm
                         bool kwHit = titles[i].IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0
                                   || bodies[i].IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0
                                   || alts[i].IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0
-                                  || notes[i].IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0;
+                                  || notes[i].IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0
+                                  || PinyinHelper.Matches(GetCachedPinyinTitle(titles[i]), kw);
                         if (!kwHit) { hit = false; break; }
                     }
                 }
@@ -998,21 +987,17 @@ public partial class MainForm
                 }
             }
             btnClearSearch.Visible = tokens.Length > 0;
+            list.HighlightTokens = tokens;
             lblMatchCount.Text = tokens.Length > 0
-                ? ("找到 " + hitCmds + " 条匹配（单击即复制）")
-                : ("共 " + cmdCount + " 条（单击即复制）");
+                ? ("命中 " + hitCmds + " 条")
+                : ("共 " + cmdCount + " 条");
             list.EmptyText = tokens.Length > 0
-                ? ("（未找到匹配“" + q + "”的条目，按 Esc 清空筛选）")
+                ? ("（未找到匹配“" + q + "”的条目，按 Esc 清空筛选，或按 Alt+K 跨全库搜索）")
                 : "（暂无条目）";
+            layoutStrip();
             rebuildView();
             setPreviewContent("");
-            fitPreview();
         };
-
-        if (idBox != null)
-        {
-            idBox.TextChanged += delegate { rebuildView(); list.Invalidate(); };
-        }
 
         // ---------- 分类收纳表：点按钮 → 弹出当前可见分组 → 单击跳转 ----------
         Action showCats = delegate
@@ -1046,7 +1031,7 @@ public partial class MainForm
             pop.ShowInTaskbar = false;
             pop.StartPosition = FormStartPosition.Manual;
             pop.Text = "分类（单击跳转，Esc 关闭）";
-            pop.TopMost = true;              // 弹在工具窗口之上，点了就走
+            pop.TopMost = true;
             pop.ClientSize = new Size(320, Math.Min(470, 44 + names.Count * 26));
             pop.BackColor = IsDark ? Color.FromArgb(22, 27, 34) : Color.White;
             pop.KeyPreview = true;
@@ -1093,18 +1078,15 @@ public partial class MainForm
             if (lb.Items.Count > 0) lb.SelectedIndex = 0;
         };
         btnCats.Click += delegate { showCats(); };
-        var miCats = new ToolStripMenuItem("按分类跳转…");
-        miCats.Click += delegate { showCats(); };
 
         list.SelChanged += delegate
         {
             int k = list.Sel;
-            if (k < 0 || k >= shownN) { setPreviewContent(""); fitPreview(); return; }
+            if (k < 0 || k >= shownN) { setPreviewContent(""); return; }
             string pv = vHeads[k] ? "" : vValues[k];
             if (!vHeads[k] && !string.IsNullOrEmpty(vNotes[k]))
-                pv = pv + Environment.NewLine + Environment.NewLine + vNotes[k];
+                pv = pv + Environment.NewLine + vNotes[k];
             setPreviewContent(pv);
-            fitPreview();
         };
 
         list.ItemActivated += delegate
@@ -1112,6 +1094,7 @@ public partial class MainForm
             int k = list.Sel;
             if (k < 0 || k >= shownN || vHeads[k]) return;
             CopyToClipboard(vLabels[k], vValues[k]);
+            RecordRecentCopy(label, vLabels[k]);
         };
 
         list.ItemRightClick += delegate(object s, MouseEventArgs e)
@@ -1120,18 +1103,38 @@ public partial class MainForm
             if (k < 0 || k >= shownN || vHeads[k]) return;
             var menu = new ContextMenuStrip();
             menu.Closed += delegate { SafeBeginInvoke(delegate { menu.Dispose(); }); };
-            var it1 = new ToolStripMenuItem("复制主命令：" + Shorten(vValues[k]));
-            it1.Click += delegate { CopyToClipboard(vLabels[k], vValues[k]); };
+            var it1 = new ToolStripMenuItem("复制当前命令：" + Shorten(vValues[k]));
+            it1.Click += delegate
+            {
+                CopyToClipboard(vLabels[k], vValues[k]);
+                RecordRecentCopy(label, vLabels[k]);
+            };
             menu.Items.Add(it1);
             if (!string.IsNullOrEmpty(vAlts[k]))
             {
-                var it2 = new ToolStripMenuItem("复制替换命令：" + Shorten(vAlts[k]));
-                it2.Click += delegate { CopyToClipboard(vLabels[k], vAlts[k]); };
+                // 修复 V1.8.3 Bug：右键复制替换命令同样应用当前全局目标玩家名
+                string altApplied = ApplyTargetName(vAlts[k], globalTargetName);
+                var it2 = new ToolStripMenuItem("复制替换命令：" + Shorten(altApplied));
+                it2.Click += delegate
+                {
+                    CopyToClipboard(vLabels[k], altApplied);
+                    RecordRecentCopy(label, vLabels[k]);
+                };
                 menu.Items.Add(it2);
             }
             var it3 = new ToolStripMenuItem("仅复制名称：" + Shorten(vLabels[k]));
             it3.Click += delegate { CopyToClipboard("条目名称", vLabels[k]); };
             menu.Items.Add(it3);
+
+            string pinKey = MakePinKey(label, vLabels[k]);
+            bool curPin = IsPinnedKey(pinKey);
+            var itPin = new ToolStripMenuItem(curPin ? "★ 取消常用收藏" : "☆ 加入常用收藏");
+            itPin.Click += delegate
+            {
+                TogglePinKey(pinKey, vLabels[k]);
+                list.Invalidate();
+            };
+            menu.Items.Add(itPin);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -1163,59 +1166,28 @@ public partial class MainForm
             menu.Show(list, e.Location);
         };
 
-        if (hasAlt || hasUlx)
+        if (segMode != null)
         {
-
-            rbMain.CheckedChanged += delegate
+            segMode.SelectedIndexChanged += delegate
             {
-                if (!rbMain.Checked) return;
-                mode = 0;
+                int si = segMode.SelectedIndex;
+                if (si < 0 || si >= segModeMap.Length) return;
+                mode = segModeMap[si];
                 int keepSel = list.Sel;
                 rebuildView();
                 if (keepSel >= 0 && keepSel < shownN)
                 {
                     list.Sel = keepSel;
-                    setPreviewContent(vHeads[keepSel] ? "" : vValues[keepSel]);
+                    string pv = vHeads[keepSel] ? "" : vValues[keepSel];
+                    if (!vHeads[keepSel] && !string.IsNullOrEmpty(vNotes[keepSel]))
+                        pv = pv + Environment.NewLine + vNotes[keepSel];
+                    setPreviewContent(pv);
                     list.Invalidate();
                 }
-                fitPreview();
-            };
-            rbUlx.CheckedChanged += delegate
-            {
-                if (!rbUlx.Checked) return;
-                mode = 2;
-                int keepSel = list.Sel;
-                rebuildView();
-                if (mode == 2 && nUlx == 0) toast.ShowText("本页没有控制台 ulx 写法");
-                if (mode == 1 && nAlt == 0) toast.ShowText("本页没有 devforcespawn 写法");
-                if (keepSel >= 0 && keepSel < shownN)
-                {
-                    list.Sel = keepSel;
-                    setPreviewContent(vHeads[keepSel] ? "" : vValues[keepSel]);
-                    list.Invalidate();
-                }
-                fitPreview();
-            };
-            if (rbAlt != null) rbAlt.CheckedChanged += delegate
-            {
-                if (!rbAlt.Checked) return;
-                mode = 1;
-                int keepSel = list.Sel;
-                rebuildView();
-                if (mode == 2 && nUlx == 0) toast.ShowText("本页没有控制台 ulx 写法");
-                if (mode == 1 && nAlt == 0) toast.ShowText("本页没有 devforcespawn 写法");
-                if (keepSel >= 0 && keepSel < shownN)
-                {
-                    list.Sel = keepSel;
-                    setPreviewContent(vHeads[keepSel] ? "" : vValues[keepSel]);
-                    list.Invalidate();
-                }
-                fitPreview();
             };
         }
 
         btnClearSearch.Click += delegate { box.Text = ""; box.Focus(); };
-        // 焦点在列表上时按 Esc 也能清空筛选（以前只有筛选框里按才行）
         list.KeyDown += delegate(object s3, KeyEventArgs e3)
         {
             if (e3.KeyCode != Keys.Escape) return;
@@ -1243,7 +1215,6 @@ public partial class MainForm
                     list.EnsureVisible(next);
                     list.Invalidate();
                     setPreviewContent(vHeads[next] ? "" : vValues[next]);
-                    fitPreview();
                 }
                 e.Handled = true;
             }
@@ -1257,7 +1228,6 @@ public partial class MainForm
                     list.EnsureVisible(prev);
                     list.Invalidate();
                     setPreviewContent(vHeads[prev] ? "" : vValues[prev]);
-                    fitPreview();
                 }
                 e.Handled = true;
             }
@@ -1272,14 +1242,16 @@ public partial class MainForm
                     list.EnsureVisible(target);
                     list.Invalidate();
                     setPreviewContent(vValues[target]);
-                    fitPreview();
                     CopyToClipboard(vLabels[target], vValues[target]);
+                    RecordRecentCopy(label, vLabels[target]);
                 }
                 e.Handled = true;
                 e.SuppressKeyPress = true;
             }
         };
 
+        layoutStrip();
+        layoutPreviewBar();
         applyFilter("");
 
         return page;

@@ -61,6 +61,11 @@ public partial class MainForm
             case 8:
                 PauseOrResumeCountdown();
                 break;
+#if ADMIN_EDITION
+            case 9:
+                OpenCommandPalette(true);
+                break;
+#endif
         }
     }
 
@@ -130,7 +135,7 @@ public partial class MainForm
     }
 
     // ================= 关闭热键（F5/F6… 交还给系统） =================
-    const int HK_TOGGLE_ID = 9;
+    const int HK_TOGGLE_ID = 10;
     const int HK_TOGGLE_VK = 0x79;   // F10
     const int HK_TOGGLE_MOD = 0x0002; // Ctrl
 
@@ -138,13 +143,13 @@ public partial class MainForm
 
     bool HotkeysOk()
     {
-        for (int i = 1; i <= 8; i++) if (!hkRegistered[i]) return false;
+        for (int i = 1; i <= HK_COUNT; i++) if (!hkRegistered[i]) return false;
         return true;
     }
 
     void ReleaseHotkeys()
     {
-        for (int id = 1; id <= 8; id++)
+        for (int id = 1; id <= HK_COUNT; id++)
         {
             try { if (hkRegistered[id]) Native.UnregisterHotKey(Handle, id); } catch { }
             hkRegistered[id] = false;
@@ -159,6 +164,7 @@ public partial class MainForm
         else ApplyHotkeys();
         UpdateHotkeyToggleButton();
         SaveSettings();
+        RefreshUi(true);
         try { if (toast != null) toast.ShowText(hotkeysOff ? "热键已关闭，" + ToggleKeyName() + " 可恢复" : "热键已恢复"); } catch { }
     }
 
@@ -201,23 +207,36 @@ public partial class MainForm
     int ApplyHotkeys()
     {
         int fail = 0;
-        for (int id = 1; id <= 8; id++)
+        for (int id = 1; id <= HK_COUNT; id++)
         {
             try { if (hkRegistered[id]) { Native.UnregisterHotKey(Handle, id); } } catch { }
             hkRegistered[id] = false;
         }
         if (!IsHandleCreated || isClosing) return 0;
-        for (int id = 1; id <= 8; id++)
+        for (int id = 1; id <= HK_COUNT; id++)
         {
             try { hkRegistered[id] = Native.RegisterHotKey(Handle, id, (uint)hkMod[id - 1], (uint)hkVk[id - 1]); }
             catch { hkRegistered[id] = false; }
             if (!hkRegistered[id]) fail++;
         }
-        var logItems = new string[8];
-        for (int id = 1; id <= 8; id++) logItems[id - 1] = KeyName(id) + "=" + hkRegistered[id];
+        var logItems = new string[HK_COUNT];
+        for (int id = 1; id <= HK_COUNT; id++) logItems[id - 1] = KeyName(id) + "=" + hkRegistered[id];
         Native.Log("hotkeys: " + string.Join(" ", logItems));
         RegisterToggleHotkey();
         return fail;
+    }
+
+    internal void SyncHotkeysAfterEdit()
+    {
+        if (hotkeysOff)
+        {
+            ReleaseHotkeys();
+            RegisterToggleHotkey();
+        }
+        else
+        {
+            ApplyHotkeys();
+        }
     }
 
     void UpdateHotkeyLabels()
@@ -261,6 +280,9 @@ public partial class MainForm
                     + "提示：准星为透明置顶叠加层，建议将游戏显示模式设为“无边框窗口化”以获得最佳体验。";
             }
             UpdateJoinHint();
+#if ADMIN_EDITION
+            UpdateGlobalSearchShortcut();
+#endif
         }
         catch { }
     }
@@ -272,7 +294,7 @@ public partial class MainForm
         capturingKey = true;
         int[] oldVk = (int[])hkVk.Clone();
         int[] oldMod = (int[])hkMod.Clone();
-        for (int id = 1; id <= 8; id++)
+        for (int id = 1; id <= HK_COUNT; id++)
         {
             try { if (hkRegistered[id]) Native.UnregisterHotKey(Handle, id); } catch { }
             hkRegistered[id] = false;
@@ -337,17 +359,17 @@ public partial class MainForm
             f.ShowDialog(this);
         }
 
-        for (int hi = 0; hi < 8; hi++) prevHkDown[hi] = true; // 防止松键前边缘误触发
+        for (int hi = 0; hi < HK_COUNT; hi++) prevHkDown[hi] = true; // 防止松键前边缘误触发
         capturingKey = false;
         vk = cvk;
         mod = cmod;
 
         if (!got)
         {
-            Array.Copy(oldVk, hkVk, 8);
-            Array.Copy(oldMod, hkMod, 8);
+            Array.Copy(oldVk, hkVk, HK_COUNT);
+            Array.Copy(oldMod, hkMod, HK_COUNT);
         }
-        ApplyHotkeys();
+        SyncHotkeysAfterEdit();
         return got;
     }
 
@@ -389,15 +411,15 @@ public partial class MainForm
             {
                 lv.BeginUpdate();
                 lv.Items.Clear();
-                for (int id = 1; id <= 8; id++)
+                for (int id = 1; id <= HK_COUNT; id++)
                 {
                     var it = new ListViewItem(HKFunc[id - 1]);
                     it.SubItems.Add(KeyName(id));
-                    it.SubItems.Add(hkRegistered[id] ? "全局已注册" : "轮询模式");
+                    it.SubItems.Add(hotkeysOff ? "已暂停" : (hkRegistered[id] ? "全局已注册" : "轮询模式"));
                     it.SubItems.Add(HKTip[id - 1]);
-                    it.ForeColor = hkRegistered[id]
-                        ? (IsDark ? Color.FromArgb(230, 237, 243) : Color.FromArgb(30, 41, 59))
-                        : (IsDark ? Color.FromArgb(227, 179, 65) : Color.FromArgb(180, 80, 20));
+                    it.ForeColor = (hotkeysOff || !hkRegistered[id])
+                        ? (IsDark ? Color.FromArgb(227, 179, 65) : Color.FromArgb(180, 80, 20))
+                        : (IsDark ? Color.FromArgb(230, 237, 243) : Color.FromArgb(30, 41, 59));
                     it.Tag = id;
                     lv.Items.Add(it);
                 }
@@ -423,7 +445,7 @@ public partial class MainForm
                 int nvk, nmod;
                 if (!CaptureKey(out nvk, out nmod)) return;
 
-                for (int other = 1; other <= 8; other++)
+                for (int other = 1; other <= HK_COUNT; other++)
                 {
                     if (other == id) continue;
                     if (hkVk[other - 1] == nvk && hkMod[other - 1] == nmod)
@@ -435,13 +457,13 @@ public partial class MainForm
 
                 hkVk[id - 1] = nvk;
                 hkMod[id - 1] = nmod;
-                int fail = ApplyHotkeys();
+                SyncHotkeysAfterEdit();
                 SaveSettings();
                 UpdateHotkeyLabels();
                 refill();
                 for (int i = 0; i < lv.Items.Count; i++)
                     if (Convert.ToInt32(lv.Items[i].Tag) == id) { lv.Items[i].Selected = true; break; }
-                Native.Log("hotkey " + HKFunc[id - 1] + " -> " + KeyName(id) + " (fail=" + fail + ")");
+                Native.Log("hotkey " + HKFunc[id - 1] + " -> " + KeyName(id));
                 toast.ShowText(HKFunc[id - 1] + " 现在是 " + KeyName(id));
             };
 
@@ -456,15 +478,20 @@ public partial class MainForm
             bDef.SetBounds(146, 404, 100, 32);
             bDef.Click += delegate
             {
-                if (MessageBox.Show(f, "把 8 个热键都恢复成默认（F5 / F6 / F7 / F8 / Ctrl+F11 / F9 / F10 / Ctrl+F9）？",
+#if ADMIN_EDITION
+                string defMsg = "把 9 个热键都恢复成默认（F5 / F6 / F7 / F8 / Ctrl+F11 / F9 / F10 / Ctrl+F9 / Alt+K）？";
+#else
+                string defMsg = "把 8 个热键都恢复成默认（F5 / F6 / F7 / F8 / Ctrl+F11 / F9 / F10 / Ctrl+F9）？";
+#endif
+                if (MessageBox.Show(f, defMsg,
                         "RX 工具箱", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                     return;
-                for (int i = 0; i < 8; i++)
+                for (int i = 0; i < HK_COUNT; i++)
                 {
                     hkVk[i] = HKDefVk[i];
                     hkMod[i] = HKDefMod[i];
                 }
-                ApplyHotkeys();
+                SyncHotkeysAfterEdit();
                 SaveSettings();
                 UpdateHotkeyLabels();
                 refill();

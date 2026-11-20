@@ -20,6 +20,7 @@ public partial class MainForm
 {
     void LayoutAboutTab()
     {
+#if !ADMIN_EDITION
         if (tabs == null || spacerPage == null || aboutPage == null) return;
         try
         {
@@ -48,6 +49,7 @@ public partial class MainForm
             tabs.PerformLayout();
         }
         catch { }
+#endif
     }
 
     // ---------------- 更新日志 ----------------
@@ -55,6 +57,11 @@ public partial class MainForm
 #if ADMIN_EDITION
     static readonly string[] CHANGELOG = new string[]
     {
+        "1.9.0|2026-11-19|" +
+            "全面重构管理版主界面为「可折叠左侧导航轨 + 顶部全局目标玩家栏 + 底部交互状态胶囊栏」，挤服助手/屏幕准星/倒计时提升为一级直达，数据表首屏可视高度提升近 45%~" +
+            "新增半透明全局命令面板（Alt+K 全局热键唤起与再按收起切回游戏，支持居中 / 左侧 / 右侧三档悬浮抽屉与双行卡片、点击与 Ctrl+滚轮调节透明度）：跨 6 张数据表与自定义文案瞬搜，升级纯内置智能拼音引擎（支持全拼/首字母/混拼如 xrq / jiqiren / jiqr、常见多音字与 GBK 二级字）、星标常用收藏页与最近复制记忆~" +
+            "游戏内 HUD 升级为 32-bit 每像素透明渲染：准星支持抗锯齿、黑色外描边与透明度调节并完整保留 PNG 透明羽化；倒计时升级高清描边纯数字（可选胶囊背板+进度条）、平滑呼吸脉冲与可视化时间轴~" +
+            "挤服助手新增 A2S 当前地图名、实时延迟与人数迷你容量进度条；自定义文案升级为带正文预览与 {target} 动态目标/多行串联复制的现代卡片；修复热键关闭态改键误开与右键复制替换命令漏替换目标 ID 问题",
         "1.8.3|2026-11-19|" +
             "在线更新支持实时百分比进度显示并在代理异常时自动尝试直连，同时强化 HTTPS 校验、延时清理旧版与失败回退机制~" +
             "云端数据更新覆盖前自动保留本地备份、备份自动隐藏敏感密钥、对比仅列差异条目；支持多显示器副屏准星定位、表格编辑确认防误改与临时英文输入法自动卸载~" +
@@ -281,9 +288,18 @@ public partial class MainForm
         return y + lbl.Height + 4;
     }
 
+#if ADMIN_EDITION
+    Panel BuildAboutPage()
+#else
     TabPage BuildAboutPage()
+#endif
     {
+#if ADMIN_EDITION
+        var page = new Panel();
+        page.Text = "关于";
+#else
         var page = new TabPage("关于");
+#endif
         page.BackColor = Color.White;
 
         var host = new Panel();
@@ -1402,6 +1418,13 @@ public partial class MainForm
                         SetUpdState("发现新版本 v" + ver + "（当前 " + APP_VERSION_NUM + "）", Color.FromArgb(20, 130, 70));
                     if (btnUpdOpen != null) btnUpdOpen.Enabled = true;
                     updLatestNotes = notes;
+#if ADMIN_EDITION
+                    if (navRail != null)
+                    {
+                        NavItem ab = navRail.FindItem("about");
+                        if (ab != null) { ab.HasDot = true; navRail.Invalidate(); }
+                    }
+#endif
                     RenderChangelog();
                     if (toast != null)
                         toast.ShowText(belowMin ? ("发现必要更新 v" + ver + "，请前往“关于”页立即更新") : ("发现新版本 v" + ver + "，可在“关于”页查看详情"));
@@ -1410,6 +1433,13 @@ public partial class MainForm
                 {
                     SetUpdState("已是最新版本（" + APP_VERSION_NUM + "）", Color.FromArgb(60, 110, 90));
                     if (btnUpdOpen != null) btnUpdOpen.Enabled = false;
+#if ADMIN_EDITION
+                    if (navRail != null)
+                    {
+                        NavItem ab = navRail.FindItem("about");
+                        if (ab != null) { ab.HasDot = false; navRail.Invalidate(); }
+                    }
+#endif
                     if (manual && !string.IsNullOrEmpty(notes)) updLatestNotes = notes;
                 }
             });

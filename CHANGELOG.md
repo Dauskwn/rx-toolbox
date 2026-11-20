@@ -1,5 +1,19 @@
 # 更新记录
 
+## 1.9.0（2026-11-19）
+
+### 界面架构与效率革新
+- **管理版工作台重构**：告别顶部拥挤的 10 个 Tab，升级为**可折叠左侧导航轨**（[NavRail](src/ModernControls.cs)）+ **顶部全局目标玩家栏**（跨 6 张表实时同步并记忆最近 8 个目标）+ **底部交互状态胶囊栏**（[StatusPillBar](src/ModernControls.cs)，点击胶囊直切准星/跳页/打开热键设置）。将「挤服助手」「屏幕准星」「倒计时」提升为一级直达页签，并将数据表底部预览压缩为 `44px` 按需展开代码栏，首屏可视高度提升近 **45%**（[MainForm.Navigation.cs](src/MainForm.Navigation.cs) / [MainForm.Data.cs](src/MainForm.Data.cs)）。
+- **全局命令面板（`Alt+K` 全局热键与顶栏「呼出全局搜索弹窗」）**：支持**居中 / 左侧 / 右侧三档悬浮覆盖层**（侧边模式自动丝滑滑出并切换为完整命令的双行卡片，再按一次 `Alt+K` 自动收起并切回游戏焦点）与半透明调节（默认 `86%`，支持点击底栏胶囊与 `Ctrl+滚轮` 微调并持久化）及 Win11 硬件圆角；内置纯 C# 智能拼音引擎（支持全拼/首字母/混拼如 `xrq`、`jiqiren`、`jiqr`，含 `zh/ch/sh` 双字母声母、常见多音字、GBK 二级/繁体游戏字与系统兜底），支持跨 6 张数据表 + 自定义文案多词搜索、星标置顶与最近复制排序、快捷 `Enter`/`Shift+Enter`（`ulx`）复制（[CommandPalette.cs](src/CommandPalette.cs)）。
+- **常用收藏汇聚与折叠列表性能优化**：数据表左侧新增 `★` 收藏开关（持久化至 `pins.txt` 并纳入 `.rxbak` 备份），右侧命令改用圆角等宽代码胶囊（Code Chip），支持搜索命中关键词局部高亮；同步重构 `WrapList` 为固定滚动条槽位、按需懒测与局部重绘，彻底解决分类展开/收起跨越视口高度时的掉帧卡顿（[Widgets.cs](src/Widgets.cs) / [Theme.cs](src/Theme.cs)）。
+
+### 游戏内 HUD、可视化与工作流
+- **真 32-bit 每像素透明 HUD（`UpdateLayeredWindow`）**：彻底淘汰洋红扣色与锯齿边缘——矢量准星支持抗锯齿、0~2px 黑色外描边与透明度滑块；自定义 PNG 完整保留 8-bit Alpha 半透明光晕；预览框右键支持暗底/亮底/棋盘格切换；倒计时默认升级为高清黑边纯数字，并可选开启半透明胶囊背板与进度条，同时修复低频呼吸脉冲掉帧问题；`Toast` 升级为带状态灯的圆角浮层（[Native.cs](src/Native.cs) / [Overlay.cs](src/Overlay.cs)）。
+- **可拖动倒计时时间轴 & A2S 雷达增强**：倒计时页顶部新增横向交互时间轴画布（[TimelineCanvas](src/ModernControls.cs)），支持**直接点击/拖动轨道调整倒计时进度**并实时预览变色/闪烁/事件触发，同时支持标钉悬停查看与点击定位；挤服助手 A2S 解析出**当前地图**、**实时延迟（Ping ms）**并在人数徽标底部绘制容量进度条，支持按地图/延迟排序（[MainForm.ServerList.cs](src/MainForm.ServerList.cs) / [MainForm.JoinAndOcr.cs](src/MainForm.JoinAndOcr.cs)）。
+- **现代自定义卡片 & 安全性/Bug 修复**：自定义文案改用左色条 + 两行正文预览卡片（[CustomPhraseCard](src/ModernControls.cs)），支持 `{target}` 动态目标与多行右键 `; ` 控制台串联复制（[MainForm.Custom.cs](src/MainForm.Custom.cs)）；「关闭热键」按钮新增游戏原生危险快捷键误触警告提示；修复热键关闭态改键误重开全局热键及右键复制替换命令漏替换目标 ID 问题（[MainForm.Hotkeys.cs](src/MainForm.Hotkeys.cs) / [MainForm.Data.cs](src/MainForm.Data.cs)）。
+
+---
+
 ## 1.8.3（2026-11-19）
 
 ### 安全与更新体验
@@ -9,7 +23,7 @@
 ### 体验优化与修复
 - **表格编辑防护与对比精准化**：`EditDataTab` 基于临时副本编辑，提供保存/取消明确确认及单元格文本规范化；`ComputeTabDiff` 与备份对比限定在各自段名范围内，列表摘要解析改为高性能流式读取（[MainForm.DevHub.cs](src/MainForm.DevHub.cs) / [MainForm.DataBackup.cs](src/MainForm.DataBackup.cs)）。
 - **多屏定位与输入法清理**：屏幕准星/倒计时支持按游戏窗口所在显示器坐标精准定位（`GetTargetScreenBounds`），副屏也能居中对齐；切英文输入法时若临时加载了系统英文布局，退出发送时自动卸载还原，不残留多余输入法（[Overlay.cs](src/Overlay.cs) / [Native.cs](src/Native.cs) / [MainForm.JoinAndOcr.cs](src/MainForm.JoinAndOcr.cs)）。
-- **服务端与发布工程化**：Worker 鉴权增加缓存与写入限流，开发者提交接口清晰透传 4xx/5xx 错因；新增 `build/verify.ps1` 与 `build/local_update_test.py` 一键回归及本地模拟自更新脚本（管理版自检增至 **87 项**）。
+- **服务端与发布工程化**：Worker 鉴权增加缓存与写入限流（[build/pages/_worker.js](build/pages/_worker.js)），开发者提交接口清晰透传 4xx/5xx 错因；新增 `build/verify.ps1` 与 `build/local_update_test.py` 一键回归及本地模拟自更新脚本（管理版自检增至 **87 项**）。
 
 ---
 

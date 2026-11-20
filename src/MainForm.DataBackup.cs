@@ -10,7 +10,7 @@ public partial class MainForm
 {
     static readonly string[] BackupFileNames = new string[]
     {
-        "phrases.json", "data-custom.txt", "custom.txt", "servers.txt", "settings.ini"
+        "phrases.json", "data-custom.txt", "custom.txt", "servers.txt", "settings.ini", "pins.txt"
     };
 
     string CurrentPhrasesPath

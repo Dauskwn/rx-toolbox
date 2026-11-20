@@ -23,7 +23,7 @@ foreach ($c in @(
 }
 if (-not $csc) { throw "未找到 csc.exe" }
 
-$adminOnlyFiles = @("MainForm.Data.cs", "MainForm.DataBackup.cs", "MainForm.DevHub.cs")
+$adminOnlyFiles = @("MainForm.Data.cs", "MainForm.DataBackup.cs", "MainForm.DevHub.cs", "CommandPalette.cs", "MainForm.Navigation.cs")
 $srcFiles = Get-ChildItem (Join-Path $root "src") -Filter *.cs | Where-Object {
     $isAdmin -or ($adminOnlyFiles -notcontains $_.Name)
 } | Sort-Object Name | ForEach-Object { $_.FullName }

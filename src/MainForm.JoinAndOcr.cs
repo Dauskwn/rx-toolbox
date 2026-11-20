@@ -48,6 +48,14 @@ public partial class MainForm
         btnHotkeyOff.ForeColor = Color.FromArgb(60, 90, 140);
         btnHotkeyOff.FlatAppearance.BorderColor = Color.FromArgb(180, 205, 238);
         btnHotkeyOff.Click += delegate { ToggleHotkeys(); };
+        var tipHotkeyOff = new ToolTip(uiComponents);
+        tipHotkeyOff.ToolTipIcon = ToolTipIcon.Warning;
+        tipHotkeyOff.ToolTipTitle = "注意：关闭热键将交还按键给游戏";
+        tipHotkeyOff.InitialDelay = 200;
+        tipHotkeyOff.AutoPopDelay = 12000;
+        tipHotkeyOff.ShowAlways = true;
+        tipHotkeyOff.SetToolTip(btnHotkeyOff,
+            "关闭热键后，F5~F8 等按键将恢复由 GMod 自身快捷键接管。\r\n请小心误触重新进服等较危险的游戏快捷键/组合键！");
         host.Controls.Add(btnHotkeyOff);
 
         btnHotkey = new Button();
@@ -226,32 +234,35 @@ public partial class MainForm
 
         var lblMode = new Label();
         lblMode.Text = "模式：";
-        lblMode.SetBounds(194, 13, 48, 22);
+        lblMode.SetBounds(192, 13, 44, 22);
         pJoin.Controls.Add(lblMode);
 
-        rbTapMode = new RadioButton();
-        rbTapMode.Text = "手动档";
-        rbTapMode.SetBounds(242, 11, 86, 24);
-        rbTapMode.Checked = true;
-        rbTapMode.CheckedChanged += delegate { if (rbTapMode.Checked) OnModeChanged(); };
+        rbTapMode = new RadioButton(); rbTapMode.Checked = true; rbTapMode.Visible = false;
+        rbOneIp = new RadioButton(); rbOneIp.Visible = false;
+        rbPollMode = new RadioButton(); rbPollMode.Visible = false;
         pJoin.Controls.Add(rbTapMode);
-
-        rbOneIp = new RadioButton();
-        rbOneIp.Text = "单一 IP";
-        rbOneIp.SetBounds(330, 11, 90, 24);
-        rbOneIp.CheckedChanged += delegate { if (rbOneIp.Checked) OnModeChanged(); };
         pJoin.Controls.Add(rbOneIp);
-
-        rbPollMode = new RadioButton();
-        rbPollMode.Text = "收藏轮询";
-        rbPollMode.SetBounds(422, 11, 98, 24);
-        rbPollMode.CheckedChanged += delegate { if (rbPollMode.Checked) OnModeChanged(); };
         pJoin.Controls.Add(rbPollMode);
+
+        segJoinMode = new RxSegmentedControl();
+        segJoinMode.Items = new string[] { "手动档", "单一 IP", "收藏轮询" };
+        segJoinMode.SetBounds(238, 8, 252, 30);
+        segJoinMode.SelectedIndexChanged += delegate
+        {
+            suppressModeEvent = true;
+            int idx = segJoinMode.SelectedIndex;
+            rbTapMode.Checked = (idx == 0);
+            rbOneIp.Checked = (idx == 1);
+            rbPollMode.Checked = (idx == 2);
+            suppressModeEvent = false;
+            OnModeChanged();
+        };
+        pJoin.Controls.Add(segJoinMode);
 
         btnGuide = new Button();
         btnGuide.Text = "?";
         btnGuide.Font = TrackFont("Microsoft YaHei UI", 9f, FontStyle.Bold);
-        btnGuide.SetBounds(524, 10, 26, 26);
+        btnGuide.SetBounds(498, 10, 26, 26);
         btnGuide.Click += delegate { ShowGuide(); };
         pJoin.Controls.Add(btnGuide);
 
@@ -261,21 +272,21 @@ public partial class MainForm
 
         var lblSpeed = new Label();
         lblSpeed.Text = "间隔：";
-        lblSpeed.SetBounds(560, 13, 46, 22);
+        lblSpeed.SetBounds(534, 13, 44, 22);
         pJoin.Controls.Add(lblSpeed);
 
         cmbSpeed = new ThemedComboBox();
         cmbSpeed.DropDownStyle = ComboBoxStyle.DropDownList;
         cmbSpeed.Items.AddRange(TapIntervals);
         cmbSpeed.SelectedIndex = 1;
-        cmbSpeed.SetBounds(606, 10, 92, 26);
+        cmbSpeed.SetBounds(580, 10, 90, 26);
         cmbSpeed.SelectedIndexChanged += delegate { SaveSettings(); RefreshUi(true); };
         pJoin.Controls.Add(cmbSpeed);
 
         chkOcr = new CheckBox();
         chkOcr.Text = "OCR 识别进服后自动停";
         chkOcr.Checked = true;
-        chkOcr.SetBounds(712, 12, 210, 24);
+        chkOcr.SetBounds(682, 12, 180, 24);
         chkOcr.CheckedChanged += delegate
         {
             SaveSettings();
@@ -319,10 +330,12 @@ public partial class MainForm
         lvSrv.MultiSelect = true;
         lvSrv.HideSelection = false;
         lvSrv.HeaderStyle = ColumnHeaderStyle.Clickable;
-        lvSrv.Columns.Add("备注名", 110);
-        lvSrv.Columns.Add("真实服务器名（A2S 探测）", 370);
-        lvSrv.Columns.Add("人数", 104, HorizontalAlignment.Right);
-        lvSrv.Columns.Add("地址", 160);
+        lvSrv.Columns.Add("备注名", 104);
+        lvSrv.Columns.Add("真实服务器名（A2S 探测）", 260);
+        lvSrv.Columns.Add("地图", 128);
+        lvSrv.Columns.Add("延迟", 64, HorizontalAlignment.Right);
+        lvSrv.Columns.Add("人数", 108, HorizontalAlignment.Right);
+        lvSrv.Columns.Add("地址", 148);
         lvSrv.SetBounds(8, 80, 900, 290);
         lvSrv.ColumnClick += delegate(object snd, ColumnClickEventArgs ce) { SortSrvListByColumn(ce.Column); };
         lvSrv.SelectedIndexChanged += delegate
@@ -515,6 +528,43 @@ public partial class MainForm
         };
         pCross.Controls.Add(cmbColor);
 
+        var lblOutline = new Label();
+        lblOutline.Text = "黑描边：";
+        lblOutline.SetBounds(496, 12, 58, 22);
+        pCross.Controls.Add(lblOutline);
+
+        nCrossOutline = new NumericUpDown();
+        nCrossOutline.Minimum = 0; nCrossOutline.Maximum = 2;
+        nCrossOutline.Value = overlay.OutlineWidth;
+        nCrossOutline.SetBounds(556, 9, 50, 26);
+        nCrossOutline.ValueChanged += delegate
+        {
+            overlay.OutlineWidth = (int)nCrossOutline.Value;
+            overlay.Invalidate();
+            if (crossPreview != null) crossPreview.Invalidate();
+            SaveSettings();
+        };
+        pCross.Controls.Add(nCrossOutline);
+
+        var lblOpacity = new Label();
+        lblOpacity.Text = "透明度%：";
+        lblOpacity.SetBounds(618, 12, 66, 22);
+        pCross.Controls.Add(lblOpacity);
+
+        nCrossOpacity = new NumericUpDown();
+        nCrossOpacity.Minimum = 20; nCrossOpacity.Maximum = 100;
+        nCrossOpacity.Increment = 5;
+        nCrossOpacity.Value = overlay.OpacityPct;
+        nCrossOpacity.SetBounds(686, 9, 58, 26);
+        nCrossOpacity.ValueChanged += delegate
+        {
+            overlay.OpacityPct = (int)nCrossOpacity.Value;
+            overlay.Invalidate();
+            if (crossPreview != null) crossPreview.Invalidate();
+            SaveSettings();
+        };
+        pCross.Controls.Add(nCrossOpacity);
+
         var lblStyle = new Label();
         lblStyle.Text = "样式：";
         lblStyle.SetBounds(8, 56, 48, 22);
@@ -610,30 +660,30 @@ public partial class MainForm
 
         btnCrossImg = new Button();
         btnCrossImg.Text = "导入准星图片…";
-        btnCrossImg.SetBounds(8, 284, 132, 30);
+        btnCrossImg.SetBounds(8, 318, 132, 30);
         btnCrossImg.Click += delegate { ImportCrosshairImage(); };
         pCross.Controls.Add(btnCrossImg);
 
         btnCrossImgPaste = new Button();
         btnCrossImgPaste.Text = "粘贴图片";
-        btnCrossImgPaste.SetBounds(148, 284, 96, 30);
+        btnCrossImgPaste.SetBounds(148, 318, 96, 30);
         btnCrossImgPaste.Click += delegate { PasteCrosshairImage(); };
         pCross.Controls.Add(btnCrossImgPaste);
 
         btnCrossImgClear = new Button();
         btnCrossImgClear.Text = "清除图片";
-        btnCrossImgClear.SetBounds(252, 284, 88, 30);
+        btnCrossImgClear.SetBounds(252, 318, 88, 30);
         btnCrossImgClear.Click += delegate { ClearCrosshairImage(); };
         pCross.Controls.Add(btnCrossImgClear);
 
         lblCrossImg = new Label();
-        lblCrossImg.Text = "当前用内置矢量样式（可导入 PNG 做自定义准星）";
+        lblCrossImg.Text = "当前用内置 32-bit 矢量样式（导入 PNG 将完整保留透明羽化与光晕）";
         lblCrossImg.ForeColor = Color.FromArgb(90, 100, 114);
-        lblCrossImg.SetBounds(352, 290, 520, 22);
+        lblCrossImg.SetBounds(352, 324, 480, 22);
         pCross.Controls.Add(lblCrossImg);
 
         crossPreview = new CrosshairPreview(overlay);
-        crossPreview.SetBounds(8, 96, 180, 180);
+        crossPreview.SetBounds(8, 96, 210, 210);
         crossPreview.Cursor = Cursors.Hand;
         crossPreview.Click += delegate
         {
@@ -647,7 +697,7 @@ public partial class MainForm
 
         lblCrossHint = new Label();
         lblCrossHint.ForeColor = Color.FromArgb(80, 90, 102);
-        lblCrossHint.SetBounds(206, 98, 620, 160);
+        lblCrossHint.SetBounds(234, 98, 560, 190);
         pCross.Controls.Add(lblCrossHint);
         return pCross;
     }
@@ -785,50 +835,50 @@ public partial class MainForm
         cmbTimerColor.DropDownStyle = ComboBoxStyle.DropDownList;
         cmbTimerColor.Items.AddRange(CountdownOverlay.TimerColorNames);
         cmbTimerColor.SelectedIndex = 0;
-        cmbTimerColor.SetBounds(162, 100, 88, 26);
+        cmbTimerColor.SetBounds(162, 100, 80, 26);
         cmbTimerColor.SelectedIndexChanged += delegate { OnTimerAppearanceEdited(false); };
         pTimer.Controls.Add(cmbTimerColor);
 
         var lblAnchorTitle = new Label();
         lblAnchorTitle.Text = "位置:";
-        lblAnchorTitle.SetBounds(258, 102, 40, 22);
+        lblAnchorTitle.SetBounds(248, 102, 38, 22);
         pTimer.Controls.Add(lblAnchorTitle);
 
         cmbTimerAnchor = new ThemedComboBox();
         cmbTimerAnchor.DropDownStyle = ComboBoxStyle.DropDownList;
         cmbTimerAnchor.Items.AddRange(CountdownOverlay.AnchorNames);
         cmbTimerAnchor.SelectedIndex = 1;
-        cmbTimerAnchor.SetBounds(300, 100, 156, 26);
+        cmbTimerAnchor.SetBounds(288, 100, 138, 26);
         cmbTimerAnchor.SelectedIndexChanged += delegate { OnTimerAppearanceEdited(true); };
         pTimer.Controls.Add(cmbTimerAnchor);
 
         var lblOffXTitle = new Label();
         lblOffXTitle.Text = "X:";
-        lblOffXTitle.SetBounds(466, 102, 20, 22);
+        lblOffXTitle.SetBounds(434, 102, 18, 22);
         pTimer.Controls.Add(lblOffXTitle);
 
         nTimerOffX = new NumericUpDown();
         nTimerOffX.Minimum = -1000; nTimerOffX.Maximum = 1000;
         nTimerOffX.Value = 0;
-        nTimerOffX.SetBounds(488, 100, 64, 26);
+        nTimerOffX.SetBounds(454, 100, 54, 26);
         nTimerOffX.ValueChanged += delegate { OnTimerAppearanceEdited(true); };
         pTimer.Controls.Add(nTimerOffX);
 
         var lblOffYTitle = new Label();
         lblOffYTitle.Text = "Y:";
-        lblOffYTitle.SetBounds(560, 102, 20, 22);
+        lblOffYTitle.SetBounds(516, 102, 18, 22);
         pTimer.Controls.Add(lblOffYTitle);
 
         nTimerOffY = new NumericUpDown();
         nTimerOffY.Minimum = -1000; nTimerOffY.Maximum = 1000;
         nTimerOffY.Value = 24;
-        nTimerOffY.SetBounds(582, 100, 64, 26);
+        nTimerOffY.SetBounds(536, 100, 54, 26);
         nTimerOffY.ValueChanged += delegate { OnTimerAppearanceEdited(true); };
         pTimer.Controls.Add(nTimerOffY);
 
         btnTimerResetPos = new Button();
         btnTimerResetPos.Text = "重置位置";
-        btnTimerResetPos.SetBounds(656, 98, 82, 28);
+        btnTimerResetPos.SetBounds(598, 98, 74, 28);
         btnTimerResetPos.Click += delegate
         {
             suppressTimerCtrl = true;
@@ -844,16 +894,44 @@ public partial class MainForm
         };
         pTimer.Controls.Add(btnTimerResetPos);
 
+        chkTimerCard = new CheckBox();
+        chkTimerCard.Text = "胶囊背板";
+        chkTimerCard.Checked = timerUseCard;
+        chkTimerCard.SetBounds(682, 101, 82, 24);
+        chkTimerCard.CheckedChanged += delegate
+        {
+            if (suppressTimerCtrl) return;
+            timerUseCard = chkTimerCard.Checked;
+            SyncTimerOverlay(true);
+            SaveSettings();
+        };
+        pTimer.Controls.Add(chkTimerCard);
+
         pTimerDiv2 = new Panel();
         pTimerDiv2.SetBounds(8, 134, pTimer.ClientSize.Width - 16, 1);
         pTimerDiv2.BackColor = Color.FromArgb(226, 232, 240);
         pTimer.Controls.Add(pTimerDiv2);
 
+        timerTimeline = new TimelineCanvas();
+        timerTimeline.SetBounds(8, 142, Math.Max(400, pTimer.ClientSize.Width - 16), 64);
+        timerTimeline.NodeClicked += delegate(int nodeIdx)
+        {
+            if (lvTimerChain != null && nodeIdx >= 0 && nodeIdx < lvTimerChain.Items.Count)
+            {
+                lvTimerChain.SelectedItems.Clear();
+                lvTimerChain.Items[nodeIdx].Selected = true;
+                lvTimerChain.Items[nodeIdx].Focused = true;
+                lvTimerChain.EnsureVisible(nodeIdx);
+            }
+        };
+        timerTimeline.SeekRequested += SeekCountdownTo;
+        pTimer.Controls.Add(timerTimeline);
+
         lblTimerChainTitle = new Label();
-        lblTimerChainTitle.Text = "时间链事件（双击编辑，多条命中按顺序叠加 · 右键预设可复制、重命名或删除）：";
+        lblTimerChainTitle.Text = "时间链事件（双击编辑，多条命中按顺序叠加 · 右键预设可复制/重命名/删除）：";
         lblTimerChainTitle.ForeColor = Color.FromArgb(70, 90, 110);
         lblTimerChainTitle.AutoEllipsis = true;
-        lblTimerChainTitle.SetBounds(8, 145, 420, 22);
+        lblTimerChainTitle.SetBounds(8, 216, 420, 22);
         pTimer.Controls.Add(lblTimerChainTitle);
 
         btnChainAdd = new Button();
@@ -862,25 +940,25 @@ public partial class MainForm
         btnChainAdd.ForeColor = Color.FromArgb(24, 64, 128);
         btnChainAdd.FlatStyle = FlatStyle.Flat;
         btnChainAdd.FlatAppearance.BorderColor = Color.FromArgb(170, 200, 238);
-        btnChainAdd.SetBounds(440, 141, 112, 28);
+        btnChainAdd.SetBounds(440, 212, 112, 28);
         btnChainAdd.Click += delegate { AddTimerChainNode(); };
         pTimer.Controls.Add(btnChainAdd);
 
         btnChainEdit = new Button();
         btnChainEdit.Text = "编辑…";
-        btnChainEdit.SetBounds(558, 141, 74, 28);
+        btnChainEdit.SetBounds(558, 212, 74, 28);
         btnChainEdit.Click += delegate { EditSelectedTimerChainNode(); };
         pTimer.Controls.Add(btnChainEdit);
 
         btnChainDel = new Button();
         btnChainDel.Text = "删除";
-        btnChainDel.SetBounds(638, 141, 64, 28);
+        btnChainDel.SetBounds(638, 212, 64, 28);
         btnChainDel.Click += delegate { DeleteSelectedTimerChainNode(); };
         pTimer.Controls.Add(btnChainDel);
 
         btnChainClear = new Button();
         btnChainClear.Text = "清空";
-        btnChainClear.SetBounds(708, 141, 64, 28);
+        btnChainClear.SetBounds(708, 212, 64, 28);
         btnChainClear.Click += delegate { ClearTimerChainNodes(); };
         pTimer.Controls.Add(btnChainClear);
 
@@ -894,7 +972,15 @@ public partial class MainForm
         lvTimerChain.Columns.Add("触发时间", 196);
         lvTimerChain.Columns.Add("事件效果（变色 / 闪烁 / 文字标注）", 380);
         lvTimerChain.Columns.Add("状态", 104);
-        lvTimerChain.SetBounds(8, 175, Math.Max(400, pTimer.ClientSize.Width - 16), 200);
+        lvTimerChain.SetBounds(8, 246, Math.Max(400, pTimer.ClientSize.Width - 16), 160);
+        lvTimerChain.SelectedIndexChanged += delegate
+        {
+            if (timerTimeline != null)
+            {
+                timerTimeline.SelectedNodeIndex = lvTimerChain.SelectedIndices.Count > 0 ? lvTimerChain.SelectedIndices[0] : -1;
+                timerTimeline.Invalidate();
+            }
+        };
         lvTimerChain.DoubleClick += delegate { EditSelectedTimerChainNode(); };
         lvTimerChain.KeyDown += delegate(object snd, KeyEventArgs ke)
         {
@@ -929,10 +1015,17 @@ public partial class MainForm
         if (btnHotkey == null || btnHotkey.Parent == null) return;
         int pageW = btnHotkey.Parent.ClientSize.Width;
         if (pageW < 400) pageW = 400;
-        if (btnHotkey != null) btnHotkey.SetBounds(pageW - 8 - 104, 10, 104, 36);
-        if (bLog != null) bLog.SetBounds(pageW - 8 - 104 - 8 - 96, 10, 96, 36);
-        if (btnHotkeyOff != null) btnHotkeyOff.SetBounds(pageW - 8 - 104 - 8 - 96 - 8 - 176, 10, 176, 36);
+        int ty = 6;
 #if !ADMIN_EDITION
+        ty = 10;
+#endif
+        if (btnHotkey != null) btnHotkey.SetBounds(pageW - 8 - 104, ty, 104, 34);
+        if (bLog != null) bLog.SetBounds(pageW - 8 - 104 - 8 - 96, ty, 96, 34);
+        if (btnHotkeyOff != null) btnHotkeyOff.SetBounds(pageW - 8 - 104 - 8 - 96 - 8 - 176, ty, 176, 34);
+#if ADMIN_EDITION
+        if (lblToolPageTip != null && btnHotkeyOff != null)
+            lblToolPageTip.SetBounds(12, ty + 6, Math.Max(120, btnHotkeyOff.Left - 24), 22);
+#else
         if (lblPlayerBarTip != null && btnHotkeyOff != null)
             lblPlayerBarTip.SetBounds(12, 17, Math.Max(120, btnHotkeyOff.Left - 24), 22);
 #endif
@@ -971,18 +1064,29 @@ public partial class MainForm
         if (pTimerDiv1 != null) pTimerDiv1.SetBounds(8, 91, W - 16, 1);
         if (pTimerDiv2 != null) pTimerDiv2.SetBounds(8, 134, W - 16, 1);
 
-        if (btnChainClear != null) btnChainClear.SetBounds(W - 72, 141, 64, 28);
-        if (btnChainDel != null) btnChainDel.SetBounds(W - 142, 141, 64, 28);
-        if (btnChainEdit != null) btnChainEdit.SetBounds(W - 222, 141, 74, 28);
-        if (btnChainAdd != null) btnChainAdd.SetBounds(W - 340, 141, 112, 28);
-        if (lblTimerChainTitle != null) lblTimerChainTitle.SetBounds(8, 145, Math.Max(180, W - 356), 22);
+        int chainBarY = 212;
+        if (timerTimeline != null)
+        {
+            timerTimeline.SetBounds(8, 142, W - 16, 64);
+        }
+        else
+        {
+            chainBarY = 141;
+        }
 
+        if (btnChainClear != null) btnChainClear.SetBounds(W - 72, chainBarY, 64, 28);
+        if (btnChainDel != null) btnChainDel.SetBounds(W - 142, chainBarY, 64, 28);
+        if (btnChainEdit != null) btnChainEdit.SetBounds(W - 222, chainBarY, 74, 28);
+        if (btnChainAdd != null) btnChainAdd.SetBounds(W - 340, chainBarY, 112, 28);
+        if (lblTimerChainTitle != null) lblTimerChainTitle.SetBounds(8, chainBarY + 4, Math.Max(180, W - 356), 22);
+
+        int lvTop = chainBarY + 34;
         int hintH = 22;
         int hintY = H - 6 - hintH;
-        int lvH = Math.Max(90, hintY - 6 - 175);
+        int lvH = Math.Max(80, hintY - 6 - lvTop);
         if (lvTimerChain != null)
         {
-            lvTimerChain.SetBounds(8, 175, W - 16, lvH);
+            lvTimerChain.SetBounds(8, lvTop, W - 16, lvH);
             if (lvTimerChain.Columns.Count == 4)
             {
                 int cw0 = 44, cw1 = 196, cw3 = 104;
@@ -1001,6 +1105,32 @@ public partial class MainForm
     {
         TimerChainPreset.EvaluateTimeline(timerNodes, timerRemainSec, timerColorIdx,
             out timerActiveColorIdx, out timerActiveFlash, out timerActiveLabel);
+    }
+
+    void SeekCountdownTo(int targetSec)
+    {
+        int tot = Math.Max(1, timerTotalSec);
+        int clamped = Math.Max(0, Math.Min(tot, targetSec));
+        if (clamped == timerRemainSec) return;
+        timerRemainSec = clamped;
+        if (timerRunning)
+        {
+            if (!timerPaused)
+            {
+                DateTime now = DateTime.Now;
+                timerEndAt = now.AddSeconds(clamped);
+                timerStartedAt = now.AddSeconds(-(tot - clamped));
+            }
+            else
+            {
+                timerPausedRemainMs = clamped * 1000.0;
+                timerPausedElapsedMs = Math.Max(0L, (long)(tot - clamped) * 1000L);
+            }
+        }
+        if (clamped == 0) timerFlashDim = false;
+        EvaluateCurrentTimeline();
+        SyncTimerOverlay(false);
+        UpdateTimerUi();
     }
 
     void StartOrResetCountdown()
@@ -1100,9 +1230,12 @@ public partial class MainForm
             lastTimerOverlayLabel = lbl;
             layoutChanged = true;
         }
+        timerOverlay.TotalSeconds = Math.Max(1, timerTotalSec);
         timerOverlay.RemainingSeconds = timerRemainSec;
         timerOverlay.ActiveColorIndex = timerActiveColorIdx;
         timerOverlay.FlashDim = timerFlashDim;
+        timerOverlay.PulseAlpha = timerPulseAlpha;
+        timerOverlay.UseCardStyle = timerUseCard;
         timerOverlay.ActiveLabel = lbl;
         timerOverlay.FontSize = timerFontSize;
         timerOverlay.AnchorIndex = timerAnchorIdx;
@@ -1389,12 +1522,20 @@ public partial class MainForm
             lvTimerChain.Items[selIdx].Selected = true;
         lvTimerChain.EndUpdate();
         UpdateTimerChainRowsState();
+        if (timerTimeline != null)
+        {
+            timerTimeline.TotalSeconds = Math.Max(1, timerTotalSec);
+            timerTimeline.RemainingSeconds = timerRemainSec;
+            timerTimeline.IsRunning = timerRunning && !timerPaused;
+            timerTimeline.Nodes = timerNodes;
+            timerTimeline.Invalidate();
+        }
     }
 
     void UpdateTimerChainRowsState()
     {
         if (lvTimerChain == null) return;
-        bool activeClock = (timerRunning || timerRemainSec == 0);
+        bool activeClock = (timerRunning || timerRemainSec != timerTotalSec);
         Color rowBg = IsDark ? Color.FromArgb(13, 17, 23) : Color.White;
         Color txtNormal = IsDark ? Color.FromArgb(230, 237, 243) : Color.FromArgb(30, 41, 59);
         Color txtMuted = IsDark ? Color.FromArgb(139, 148, 158) : Color.FromArgb(110, 120, 134);
@@ -1825,6 +1966,14 @@ public partial class MainForm
             if (lblTimerState.ForeColor != sc) lblTimerState.ForeColor = sc;
         }
         UpdateTimerChainRowsState();
+        if (timerTimeline != null)
+        {
+            timerTimeline.TotalSeconds = Math.Max(1, timerTotalSec);
+            timerTimeline.RemainingSeconds = timerRemainSec;
+            timerTimeline.IsRunning = timerRunning && !timerPaused;
+            timerTimeline.Nodes = timerNodes;
+            timerTimeline.Invalidate();
+        }
     }
 
     // ---------- 配置持久化 ----------
@@ -1852,7 +2001,7 @@ public partial class MainForm
                 if (k.Length > 6 && k.StartsWith("Hotkey", StringComparison.Ordinal))
                 {
                     int hi, hv;
-                    if (int.TryParse(k.Substring(6), out hi) && hi >= 1 && hi <= 8 && int.TryParse(v, out hv))
+                    if (int.TryParse(k.Substring(6), out hi) && hi >= 1 && hi <= HK_COUNT && int.TryParse(v, out hv))
                     {
                         if (hi == 8) hasHotkey8 = true;
                         int nvk = hv / 16, nmod = hv % 16;
@@ -1864,6 +2013,21 @@ public partial class MainForm
                     }
                     continue;
                 }
+#if ADMIN_EDITION
+                if (k == "RecentTargets")
+                {
+                    recentTargets.Clear();
+                    if (v.Length > 0)
+                    {
+                        foreach (string one in v.Split('|'))
+                        {
+                            string t = one.Trim();
+                            if (t.Length > 0 && recentTargets.Count < 8) recentTargets.Add(t);
+                        }
+                    }
+                    continue;
+                }
+#endif
                 if (k == "TimerChains")
                 {
                     hasTimerChains = true;
@@ -1930,6 +2094,35 @@ public partial class MainForm
                     overlay.DotSize = iv;
                     if (nDot != null) nDot.Value = iv;
                 }
+                else if (k == "CrossOutline" && iv >= 0 && iv <= 2)
+                {
+                    overlay.OutlineWidth = iv;
+                    if (nCrossOutline != null) nCrossOutline.Value = iv;
+                }
+                else if (k == "CrossOpacity" && iv >= 20 && iv <= 100)
+                {
+                    overlay.OpacityPct = iv;
+                    if (nCrossOpacity != null) nCrossOpacity.Value = iv;
+                }
+                else if (k == "TimerUseCard")
+                {
+                    timerUseCard = (iv != 0);
+                    if (chkTimerCard != null) chkTimerCard.Checked = timerUseCard;
+                }
+#if ADMIN_EDITION
+                else if (k == "NavCollapsed")
+                {
+                    navRailCollapsed = (iv != 0);
+                }
+                else if (k == "PaletteOpacity" && iv >= CommandPaletteForm.MinOpacityPct && iv <= CommandPaletteForm.MaxOpacityPct)
+                {
+                    paletteOpacityPct = iv;
+                }
+                else if (k == "PaletteDock" && iv >= 0 && iv <= 2)
+                {
+                    paletteDockMode = iv;
+                }
+#endif
                 else if (k == "TimerPresetIdx")
                 {
                     loadedPresetIdx = iv;
@@ -1999,6 +2192,7 @@ public partial class MainForm
                     if (iv == 0) rbTapMode.Checked = true;
                     else if (iv == 2) rbPollMode.Checked = true;
                     else rbOneIp.Checked = true;
+                    if (segJoinMode != null) segJoinMode.SetSelectedSilent(iv);
                     suppressModeEvent = false;
                 }
             }
@@ -2072,11 +2266,13 @@ public partial class MainForm
             sb.Append("Length=").Append(overlay.Length).Append("\r\n");
             sb.Append("Gap=").Append(overlay.Gap).Append("\r\n");
             sb.Append("DotSize=").Append(overlay.DotSize).Append("\r\n");
+            sb.Append("CrossOutline=").Append(overlay.OutlineWidth).Append("\r\n");
+            sb.Append("CrossOpacity=").Append(overlay.OpacityPct).Append("\r\n");
             if (cmbSpeed != null) sb.Append("SpeedIndex=").Append(cmbSpeed.SelectedIndex).Append("\r\n");
             if (chkOcr != null) sb.Append("OcrOn=").Append(chkOcr.Checked ? 1 : 0).Append("\r\n");
             if (overlay != null && !string.IsNullOrEmpty(overlay.CustomImagePath))
                 sb.Append("CrossImg=").Append(overlay.CustomImagePath).Append("\r\n");
-            for (int hi = 0; hi < 8; hi++)
+            for (int hi = 0; hi < HK_COUNT; hi++)
                 sb.Append("Hotkey").Append(hi + 1).Append("=").Append(hkVk[hi] * 16 + hkMod[hi]).Append("\r\n");
             sb.Append("TimerPresetIdx=").Append(activePresetIdx).Append("\r\n");
             sb.Append("TimerLastMode=").Append(lastAddedTriggerMode).Append("\r\n");
@@ -2086,6 +2282,7 @@ public partial class MainForm
             sb.Append("TimerAnchor=").Append(timerAnchorIdx).Append("\r\n");
             sb.Append("TimerOffX=").Append(timerOffX).Append("\r\n");
             sb.Append("TimerOffY=").Append(timerOffY).Append("\r\n");
+            sb.Append("TimerUseCard=").Append(timerUseCard ? 1 : 0).Append("\r\n");
             sb.Append("TimerChains=").Append(TimerChainPreset.SerializePresets(timerPresets)).Append("\r\n");
             sb.Append("TimerCustomChain=").Append(TimerChainPreset.SerializeNodes(timerNodes)).Append("\r\n");
             sb.Append("JMode=").Append(JoinModeIdx).Append("\r\n");
@@ -2093,6 +2290,11 @@ public partial class MainForm
 #if ADMIN_EDITION
             sb.Append("DataUpdateMode=").Append(dataUpdateMode).Append("\r\n");
             sb.Append("DevTools=").Append(devToolsOn ? 1 : 0).Append("\r\n");
+            sb.Append("NavCollapsed=").Append(navRailCollapsed ? 1 : 0).Append("\r\n");
+            sb.Append("PaletteOpacity=").Append(paletteOpacityPct).Append("\r\n");
+            sb.Append("PaletteDock=").Append(paletteDockMode).Append("\r\n");
+            if (recentTargets.Count > 0)
+                sb.Append("RecentTargets=").Append(string.Join("|", recentTargets.ToArray())).Append("\r\n");
 #endif
             sb.Append("ThemeMode=").Append(themeMode).Append("\r\n");
             if (!string.IsNullOrEmpty(updateUrl)) sb.Append("UpdateUrl=").Append(updateUrl).Append("\r\n");

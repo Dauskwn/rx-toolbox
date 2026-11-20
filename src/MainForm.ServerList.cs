@@ -129,7 +129,16 @@ public partial class MainForm
 
     static bool A2SQuery(string host, int port, int timeoutMs, out string name, out int players, out int maxPlayers)
     {
+        string dummyMap;
+        int dummyPing;
+        return A2SQuery(host, port, timeoutMs, out name, out dummyMap, out dummyPing, out players, out maxPlayers);
+    }
+
+    static bool A2SQuery(string host, int port, int timeoutMs, out string name, out string map, out int pingMs, out int players, out int maxPlayers)
+    {
         name = "";
+        map = "";
+        pingMs = -1;
         players = 0;
         maxPlayers = 0;
         try
@@ -139,25 +148,30 @@ public partial class MainForm
             using (var udp = new UdpClient())
             {
                 udp.Client.ReceiveTimeout = timeoutMs;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 byte[] req = A2SReq(null);
                 udp.Send(req, req.Length, ep);
                 IPEndPoint from = new IPEndPoint(IPAddress.Any, 0);
                 byte[] resp = udp.Receive(ref from);
+                long rtt = sw.ElapsedMilliseconds;
                 if (!SameEndPoint(from, ep)) return false;
 
                 int tries = 0;
                 while (resp != null && resp.Length >= 9 && IsSimpleHeader(resp, 0x41) && tries < 2)
                 {
                     tries++;
+                    sw.Restart();
                     byte[] req2 = A2SReq(new byte[] { resp[5], resp[6], resp[7], resp[8] });
                     udp.Send(req2, req2.Length, ep);
                     from = new IPEndPoint(IPAddress.Any, 0);
                     resp = udp.Receive(ref from);
+                    rtt = sw.ElapsedMilliseconds;
                     if (!SameEndPoint(from, ep)) return false;
                 }
 
                 resp = ReceiveA2SPayload(udp, ep, resp);
                 if (resp == null || resp.Length < 6 || !IsSimpleHeader(resp, 0x49)) return false;
+                pingMs = (int)Math.Max(1, Math.Min(9999, rtt));
                 int p = 6;
                 int nend = p;
                 while (nend < resp.Length && resp[nend] != 0) nend++;
@@ -165,10 +179,13 @@ public partial class MainForm
                 name = Encoding.UTF8.GetString(resp, p, Math.Max(0, nend - p));
                 p = nend + 1;
 
+                // 第 1 个附带字段为当前地图名，后面 2 个为 folder 与 game
                 for (int i = 0; i < 3; i++)
                 {
+                    int start = p;
                     while (p < resp.Length && resp[p] != 0) p++;
                     if (p >= resp.Length) return false;
+                    if (i == 0) map = Encoding.UTF8.GetString(resp, start, Math.Max(0, p - start));
                     p++;
                 }
 
@@ -250,7 +267,24 @@ public partial class MainForm
         int listH = Math.Max(80, listBottom - 80);
         if (lblTapGuide != null) lblTapGuide.SetBounds(8, 80, W - 16, listH);
         if (lvSrv != null) lvSrv.SetBounds(8, 80, W - 16, listH);
-        if (lvSrv != null && lvSrv.Columns.Count == 4)
+        if (lvSrv != null && lvSrv.Columns.Count == 6)
+        {
+            int wAlias = 104, wMap = 132, wPing = 64, wPl = 108, wAddr = 148;
+            int wReal = W - 16 - wAlias - wMap - wPing - wPl - wAddr - 26;
+            if (wReal < 140)
+            {
+                wMap = 100;
+                wAddr = 134;
+                wReal = Math.Max(120, W - 16 - wAlias - wMap - wPing - wPl - wAddr - 26);
+            }
+            lvSrv.Columns[0].Width = wAlias;
+            lvSrv.Columns[1].Width = wReal;
+            lvSrv.Columns[2].Width = wMap;
+            lvSrv.Columns[3].Width = wPing;
+            lvSrv.Columns[4].Width = wPl;
+            lvSrv.Columns[5].Width = wAddr;
+        }
+        else if (lvSrv != null && lvSrv.Columns.Count == 4)
         {
             int wAddr = 156, wPl = 104, wAlias = 106;
             int wReal = W - 16 - wAddr - wPl - wAlias - 26;
@@ -311,11 +345,15 @@ public partial class MainForm
         favCount = new int[favList.Length];
         favMax = new int[favList.Length];
         favName = new string[favList.Length];
+        favMap = new string[favList.Length];
+        favPing = new int[favList.Length];
         for (int i = 0; i < favList.Length; i++)
         {
             favCount[i] = -2;      // -2 = 还没查过（显示 —），-1 = 查询失败
             favMax[i] = 0;
             favName[i] = "";
+            favMap[i] = "";
+            favPing[i] = -1;
             string addr = AddrOf(favList[i]);
             string[] parts = favList[i].Split('|');
             string nm = (parts.Length > 1) ? parts[1].Trim() : "";
@@ -325,6 +363,8 @@ public partial class MainForm
             var it = new ListViewItem(nm);
             it.UseItemStyleForSubItems = false;
             it.SubItems.Add(cached.Length > 0 ? cached : "—");
+            it.SubItems.Add("—");
+            it.SubItems.Add("—");
             it.SubItems.Add("—");
             it.SubItems.Add(addr);
             it.Tag = addr;
@@ -373,7 +413,9 @@ public partial class MainForm
         it.BackColor = rowBg;
         it.SubItems[0].BackColor = rowBg;
         it.SubItems[1].BackColor = rowBg;
+        it.SubItems[2].BackColor = rowBg;
         it.SubItems[3].BackColor = rowBg;
+        it.SubItems[5].BackColor = rowBg;
         it.SubItems[0].ForeColor = isCurrentTarget
             ? (IsDark ? Color.FromArgb(88, 166, 255) : Color.FromArgb(24, 64, 128))
             : (IsDark ? Color.FromArgb(230, 237, 243) : Color.FromArgb(30, 41, 59));
@@ -384,10 +426,23 @@ public partial class MainForm
         if (it.SubItems[1].Text != rname) it.SubItems[1].Text = rname;
         it.SubItems[1].ForeColor = IsDark ? Color.FromArgb(201, 209, 217) : Color.FromArgb(51, 65, 85);
 
+        // 地图列
+        string mp = (i < favMap.Length && !string.IsNullOrEmpty(favMap[i])) ? favMap[i] : "—";
+        if (it.SubItems[2].Text != mp) it.SubItems[2].Text = mp;
+        it.SubItems[2].ForeColor = ThemePalette.TextSecondary;
+
+        // 延迟列
+        int ping = (i < favPing.Length) ? favPing[i] : -1;
+        string pingTxt = (ping > 0) ? (ping + "ms") : "—";
+        if (it.SubItems[3].Text != pingTxt) it.SubItems[3].Text = pingTxt;
+        it.SubItems[3].ForeColor = (ping <= 0) ? ThemePalette.TextMuted
+            : (ping < 65 ? ThemePalette.Success : (ping < 140 ? ThemePalette.Warning : ThemePalette.Danger));
+
         string txt;
         Color fg;
         Color bg = rowBg;
         bool boldCount = false;
+        int[] capTag = null;
         if (favCount[i] == -3)
         {
             txt = "查询中…";
@@ -407,6 +462,7 @@ public partial class MainForm
         {
             bool full = favMax[i] > 0 && favCount[i] >= favMax[i];
             txt = favCount[i] + "/" + favMax[i] + (full ? " [满]" : " [空]");
+            capTag = new int[] { favCount[i], favMax[i] };
             if (IsDark)
             {
                 fg = full ? Color.FromArgb(255, 161, 152) : Color.FromArgb(126, 231, 135);
@@ -419,12 +475,13 @@ public partial class MainForm
             }
             boldCount = true;
         }
-        if (it.SubItems[2].Text != txt) it.SubItems[2].Text = txt;
-        it.SubItems[2].ForeColor = fg;
-        it.SubItems[2].BackColor = bg;
-        it.SubItems[2].Font = TrackFont("Microsoft YaHei UI", 9f, boldCount ? FontStyle.Bold : FontStyle.Regular);
+        if (it.SubItems[4].Text != txt) it.SubItems[4].Text = txt;
+        it.SubItems[4].ForeColor = fg;
+        it.SubItems[4].BackColor = bg;
+        it.SubItems[4].Tag = capTag;
+        it.SubItems[4].Font = TrackFont("Microsoft YaHei UI", 9f, boldCount ? FontStyle.Bold : FontStyle.Regular);
 
-        it.SubItems[3].ForeColor = IsDark ? Color.FromArgb(139, 148, 158) : Color.FromArgb(100, 116, 139);
+        it.SubItems[5].ForeColor = IsDark ? Color.FromArgb(139, 148, 158) : Color.FromArgb(100, 116, 139);
         if (lvSrv.IsHandleCreated) lvSrv.Invalidate(it.Bounds);
     }
 
@@ -472,6 +529,18 @@ public partial class MainForm
             }
             else if (col == 2)
             {
+                string ma = a < favMap.Length ? (favMap[a] ?? "") : "";
+                string mb = b < favMap.Length ? (favMap[b] ?? "") : "";
+                cmp = string.Compare(ma, mb, StringComparison.OrdinalIgnoreCase);
+            }
+            else if (col == 3)
+            {
+                int pa = (a < favPing.Length && favPing[a] > 0) ? favPing[a] : int.MaxValue;
+                int pb = (b < favPing.Length && favPing[b] > 0) ? favPing[b] : int.MaxValue;
+                cmp = pa.CompareTo(pb);
+            }
+            else if (col == 4)
+            {
                 // 按空位优先级排序：有空位(0) < 满员(1) < 未查/失败(2)
                 int rankA = (favCount[a] >= 0 && favMax[a] > 0) ? (favCount[a] < favMax[a] ? 0 : 1) : 2;
                 int rankB = (favCount[b] >= 0 && favMax[b] > 0) ? (favCount[b] < favMax[b] ? 0 : 1) : 2;
@@ -489,6 +558,8 @@ public partial class MainForm
         int[] newCnt = new int[n];
         int[] newMax = new int[n];
         string[] newNam = new string[n];
+        string[] newMap = new string[n];
+        int[] newPing = new int[n];
         for (int i = 0; i < n; i++)
         {
             int old = order[i];
@@ -496,6 +567,8 @@ public partial class MainForm
             newCnt[i] = old < favCount.Length ? favCount[old] : -2;
             newMax[i] = old < favMax.Length ? favMax[old] : 0;
             newNam[i] = old < favName.Length ? favName[old] : "";
+            newMap[i] = old < favMap.Length ? favMap[old] : "";
+            newPing[i] = old < favPing.Length ? favPing[old] : -1;
         }
         favList = newFav;
         SaveFavs();
@@ -506,6 +579,8 @@ public partial class MainForm
         favCount = newCnt;
         favMax = newMax;
         favName = newNam;
+        favMap = newMap;
+        favPing = newPing;
         for (int i = 0; i < n; i++)
         {
             string addr = AddrOf(favList[i]);
@@ -515,6 +590,8 @@ public partial class MainForm
             var it = new ListViewItem(nm);
             it.UseItemStyleForSubItems = false;
             it.SubItems.Add(cached.Length > 0 ? cached : "—");
+            it.SubItems.Add("—");
+            it.SubItems.Add("—");
             it.SubItems.Add("—");
             it.SubItems.Add(addr);
             it.Tag = addr;
@@ -616,21 +693,22 @@ public partial class MainForm
             int pn2;
             if (colon <= 0 || !int.TryParse(addrQ.Substring(colon + 1), out pn2))
             {
-                DoneOneFav(myVer, fi, addrQ, false, 0, 0, "");
+                DoneOneFav(myVer, fi, addrQ, false, 0, 0, "", "", -1);
                 continue;
             }
             string host2 = addrQ.Substring(0, colon).Trim();
             Task.Run(delegate
             {
-                string nm2 = "";
-                int p3 = 0, m3 = 0;
+                string nm2 = "", mp2 = "";
+                int p3 = 0, m3 = 0, png2 = -1;
                 bool ok2 = false;
-                try { ok2 = A2SQuery(host2, pn2, 1400, out nm2, out p3, out m3); }
+                try { ok2 = A2SQuery(host2, pn2, 1400, out nm2, out mp2, out png2, out p3, out m3); }
                 catch { ok2 = false; }
-                int pv = ok2 ? p3 : 0, mv = ok2 ? m3 : 0;
+                int pv = ok2 ? p3 : 0, mv = ok2 ? m3 : 0, pgv = ok2 ? png2 : -1;
                 bool okv = ok2;
                 string nmv = ok2 ? nm2 : "";
-                SafeBeginInvoke(delegate { DoneOneFav(myVer, fi, addrQ, okv, pv, mv, nmv); });
+                string mpv = ok2 ? mp2 : "";
+                SafeBeginInvoke(delegate { DoneOneFav(myVer, fi, addrQ, okv, pv, mv, nmv, mpv, pgv); });
             });
         }
     }
@@ -672,20 +750,22 @@ public partial class MainForm
         int myVer = favVersion;
         Task.Run(delegate
         {
-            string nm2 = "";
-            int p3 = 0, m3 = 0;
+            string nm2 = "", mp2 = "";
+            int p3 = 0, m3 = 0, png2 = -1;
             bool ok2 = false;
-            try { ok2 = A2SQuery(host2, pn2, 2500, out nm2, out p3, out m3); }
+            try { ok2 = A2SQuery(host2, pn2, 2500, out nm2, out mp2, out png2, out p3, out m3); }
             catch { ok2 = false; }
             if (!ok2) return;                       // 还失败就保留「超时/失败」
-            int pv = p3, mv = m3;
-            string nmv = nm2;
+            int pv = p3, mv = m3, pgv = png2;
+            string nmv = nm2, mpv = mp2;
             SafeBeginInvoke(delegate
             {
                 if (myVer != favVersion) return;
                 if (fi < 0 || fi >= favCount.Length) return;
                 favCount[fi] = pv;
                 favMax[fi] = mv;
+                if (fi < favMap.Length) favMap[fi] = mpv;
+                if (fi < favPing.Length) favPing[fi] = pgv;
                 if (!string.IsNullOrEmpty(nmv) && fi < favName.Length) favName[fi] = nmv;
                 if (CacheSrvName(fi, nmv)) SaveFavs();
                 UpdateSrvRow(fi);
@@ -715,12 +795,12 @@ public partial class MainForm
 
         Task.Run(delegate
         {
-            string nm2 = "";
-            int p3 = 0, m3 = 0;
+            string nm2 = "", mp2 = "";
+            int p3 = 0, m3 = 0, png2 = -1;
             bool ok2 = false;
-            try { ok2 = A2SQuery(host2, pn2, 850, out nm2, out p3, out m3); }
+            try { ok2 = A2SQuery(host2, pn2, 850, out nm2, out mp2, out png2, out p3, out m3); }
             catch { ok2 = false; }
-            int pv = ok2 ? p3 : 0, mv = ok2 ? m3 : 0;
+            int pv = ok2 ? p3 : 0, mv = ok2 ? m3 : 0, pgv = ok2 ? png2 : -1;
             bool okv = ok2;
             SafeBeginInvoke(delegate
             {
@@ -728,6 +808,8 @@ public partial class MainForm
                 if (!string.Equals(AddrOf(favList[fi]), addrQ, StringComparison.OrdinalIgnoreCase)) return;
                 favCount[fi] = okv ? pv : -1;
                 favMax[fi] = okv ? mv : 0;
+                if (fi < favMap.Length) favMap[fi] = okv ? mp2 : "";
+                if (fi < favPing.Length) favPing[fi] = okv ? pgv : -1;
                 if (okv && fi < favName.Length && !string.IsNullOrEmpty(nm2)) favName[fi] = nm2;
                 if (okv && CacheSrvName(fi, nm2)) SaveFavs();
                 UpdateSrvRow(fi);
@@ -750,7 +832,7 @@ public partial class MainForm
         return true;
     }
 
-    void DoneOneFav(int ver, int fi, string expectedAddr, bool ok, int players, int maxP, string srvName)
+    void DoneOneFav(int ver, int fi, string expectedAddr, bool ok, int players, int maxP, string srvName, string mapName, int pingMs)
     {
         if (ver != favVersion) return;
         if (fi >= 0 && fi < favCount.Length && fi < favList.Length
@@ -758,6 +840,8 @@ public partial class MainForm
         {
             favCount[fi] = ok ? players : -1;
             favMax[fi] = ok ? maxP : 0;
+            if (fi < favMap.Length) favMap[fi] = ok ? (mapName ?? "") : "";
+            if (fi < favPing.Length) favPing[fi] = ok ? pingMs : -1;
             if (ok && fi < favName.Length && !string.IsNullOrEmpty(srvName)) favName[fi] = srvName;
             if (ok && CacheSrvName(fi, srvName)) favDirty = true;
             UpdateSrvRow(fi);

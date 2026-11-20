@@ -651,9 +651,10 @@ public partial class MainForm
         SaveDataOverrides();         // 只写与内置基准有差异的页签，避免未改页被永久锁死
     }
 
-    TabPage BuildDevPage()
+    Panel BuildDevPage()
     {
-        var page = new TabPage("开发者工具");
+        var page = new Panel();
+        page.Text = "开发者工具";
         page.BackColor = Color.White;
         Font fBody = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
         Font fHint = TrackFont("Microsoft YaHei UI", 9f, FontStyle.Regular);
