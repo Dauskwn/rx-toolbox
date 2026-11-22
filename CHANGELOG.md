@@ -1,5 +1,18 @@
 # 更新记录
 
+## 1.9.1（2026-11-23）
+
+### 新增功能与界面优化
+- **在线选人 & `Alt+K` 原地联动**：顶栏新增「在线选人」入口，同步挤服收藏夹服务器名单，支持拼音搜索、隐藏 Bot、3 种排序与「查找我在哪个服」；`Alt+K` 快捷搜索支持直接输入 **`@`**、点击目标胶囊或按 `Ctrl+T` 原地切换在线玩家列表，设为目标后立即退回指令检索；目标名含分号 `;` 时自动加引号防止控制台误拆句（[OnlinePlayerPicker.cs](src/OnlinePlayerPicker.cs) / [CommandPalette.cs](src/CommandPalette.cs) / [MainForm.Navigation.cs](src/MainForm.Navigation.cs)）。
+- **独立「设置」页（管理版）**：左侧导航栏底部新增「设置」页（[MainForm.Settings.cs](src/MainForm.Settings.cs)），将界面主题/侧栏折叠/关闭缩进托盘、`Alt+K` 位置/透明度/选人偏好、全局热键、数据更新与备份、日志占用查看与一键清空集中收拢并与原快捷入口双向实时同步；「关于与更新」同步精简并新增「更多设置…」快捷跳转，导航栏新增紧凑高度自适应防重叠缩放（[ModernControls.cs](src/ModernControls.cs) / [Theme.cs](src/Theme.cs)）。
+- **屏幕准星方案卡片与可选收进托盘**：准星页新增可视化方案卡片条（4 套默认/最多 6 套自定义、支持保存覆盖/新建/右键重命名与删除）及中心位置 `±20px` 微调（[Overlay.cs](src/Overlay.cs) / [MainForm.JoinAndOcr.cs](src/MainForm.JoinAndOcr.cs)）；支持可选「点关闭 `(×)` 缩进系统托盘」与重复启动单实例唤醒（不销毁窗口句柄、不掉热键）。
+- **纯说明卡片分层 & 文案精简**：数据表中不可展开的纯解释性条目升级为暖琥珀圆角提示卡片 + `说明` 胶囊徽标，与蓝色可折叠分类头清晰区隔（[Widgets.cs](src/Widgets.cs)）；全量精简新增界面的技术术语，并修复 `Alt+K` 右下角透明度胶囊省略号截断。
+
+### 底层安全与稳定性加固
+- **性能与安全**：OCR 改用 `SoftwareBitmap.LockBuffer` 零 PNG 内存直传与 `TaskCompletionSource` 异步等待；更新下载禁止 HTTPS 降级跳转、限制下载体积并在生产默认拒绝 `file://`；`MiniJson` 严格校验字面量；`HubKey` 支持本地 DPAPI 加密持久化（`HubKeyEnc`），备份脱敏同时剔除明文/密文密钥；新增按来源限流的 `Native.LogWarn`、`GetLogSizeBytes()` / `ClearLog()` 与退出时释放 `Overlay`；管理版自检增至 **121 项**。
+
+---
+
 ## 1.9.0（2026-11-19）
 
 ### 界面架构与效率革新

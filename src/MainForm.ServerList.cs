@@ -199,6 +199,104 @@ public partial class MainForm
         catch { return false; }
     }
 
+#if ADMIN_EDITION
+    static byte[] A2SPlayersReq(byte[] challenge)
+    {
+        var req = new byte[9];
+        req[0] = 0xFF; req[1] = 0xFF; req[2] = 0xFF; req[3] = 0xFF;
+        req[4] = 0x55; // 'U' = A2S_PLAYER
+        if (challenge != null && challenge.Length >= 4)
+        {
+            req[5] = challenge[0];
+            req[6] = challenge[1];
+            req[7] = challenge[2];
+            req[8] = challenge[3];
+        }
+        else
+        {
+            req[5] = 0xFF; req[6] = 0xFF; req[7] = 0xFF; req[8] = 0xFF;
+        }
+        return req;
+    }
+
+    internal static List<A2SPlayerInfo> ParseA2SPlayersPayload(byte[] resp)
+    {
+        var list = new List<A2SPlayerInfo>();
+        if (resp == null || resp.Length < 6 || !IsSimpleHeader(resp, 0x44)) return list;
+        int declared = resp[5];
+        int p = 6;
+        while (p < resp.Length && list.Count < declared + 16)
+        {
+            p++; // skip player chunk index
+            if (p >= resp.Length) break;
+            int nStart = p;
+            while (p < resp.Length && resp[p] != 0) p++;
+            if (p >= resp.Length) break;
+            string name = Encoding.UTF8.GetString(resp, nStart, Math.Max(0, p - nStart));
+            p++; // skip NUL
+            if (p + 8 > resp.Length) break;
+            int score = BitConverter.ToInt32(resp, p);
+            float durF = BitConverter.ToSingle(resp, p + 4);
+            p += 8;
+            int durSec = 0;
+            if (!float.IsNaN(durF) && !float.IsInfinity(durF) && durF > 0f)
+                durSec = (int)Math.Min(10000000.0, Math.Floor((double)durF));
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            list.Add(new A2SPlayerInfo
+            {
+                Name = name,
+                Score = score,
+                DurationSec = durSec,
+                IsBot = A2SPlayerInfo.DetectBotName(name),
+                NamePinyin = PinyinHelper.BuildTitle(name)
+            });
+        }
+        return list;
+    }
+
+    internal static bool A2SPlayersQuery(string host, int port, int timeoutMs, out List<A2SPlayerInfo> players, out int pingMs)
+    {
+        players = new List<A2SPlayerInfo>();
+        pingMs = -1;
+        try
+        {
+            var ep = ResolveEndPoint(host, port, timeoutMs);
+            if (ep == null) return false;
+            using (var udp = new UdpClient())
+            {
+                udp.Client.ReceiveTimeout = timeoutMs;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                byte[] req = A2SPlayersReq(null);
+                udp.Send(req, req.Length, ep);
+                IPEndPoint from = new IPEndPoint(IPAddress.Any, 0);
+                byte[] resp = udp.Receive(ref from);
+                long rtt = sw.ElapsedMilliseconds;
+                if (!SameEndPoint(from, ep)) return false;
+
+                int tries = 0;
+                while (resp != null && resp.Length >= 9 && IsSimpleHeader(resp, 0x41) && tries < 2)
+                {
+                    tries++;
+                    sw.Restart();
+                    byte[] req2 = A2SPlayersReq(new byte[] { resp[5], resp[6], resp[7], resp[8] });
+                    udp.Send(req2, req2.Length, ep);
+                    from = new IPEndPoint(IPAddress.Any, 0);
+                    resp = udp.Receive(ref from);
+                    rtt = sw.ElapsedMilliseconds;
+                    if (!SameEndPoint(from, ep)) return false;
+                }
+
+                resp = ReceiveA2SPayload(udp, ep, resp);
+                if (resp == null || resp.Length < 6 || !IsSimpleHeader(resp, 0x44)) return false;
+                pingMs = (int)Math.Max(1, Math.Min(9999, rtt));
+                players = ParseA2SPlayersPayload(resp);
+                return true;
+            }
+        }
+        catch { return false; }
+    }
+#endif
+
     static string AddrOf(string entry)
     {
         if (string.IsNullOrEmpty(entry)) return "";
@@ -993,7 +1091,7 @@ public partial class MainForm
         toast.ShowText("已删除 " + what);
     }
 
-    static bool ParseHostPort(string raw, out string host, out int port)
+    internal static bool ParseHostPort(string raw, out string host, out int port)
     {
         host = "";
         port = 0;

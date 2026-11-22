@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -484,6 +485,8 @@ public partial class MainForm
         pCross.SetBounds(8, topY, page.ClientSize.Width - 16, page.ClientSize.Height - topY - 8);
         pCross.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         page.Controls.Add(pCross);
+        pCrossPanel = pCross;
+        pCross.Resize += delegate { LayoutCrossPanel(); };
 
         btnCross = new Button();
         btnCross.Text = "准星开关 (" + KeyName(4) + ")";
@@ -502,8 +505,11 @@ public partial class MainForm
         btnColor.Click += delegate
         {
             overlay.CycleColor();
+            suppressSettingsSave = true;
             if (cmbColor != null) cmbColor.SelectedIndex = overlay.ColorIndex;
+            suppressSettingsSave = false;
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
             RefreshUi(true);
         };
@@ -521,8 +527,10 @@ public partial class MainForm
         cmbColor.SetBounds(372, 9, 110, 26);
         cmbColor.SelectedIndexChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.ColorIndex = cmbColor.SelectedIndex;
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
             RefreshUi(true);
         };
@@ -539,9 +547,11 @@ public partial class MainForm
         nCrossOutline.SetBounds(556, 9, 50, 26);
         nCrossOutline.ValueChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.OutlineWidth = (int)nCrossOutline.Value;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
         };
         pCross.Controls.Add(nCrossOutline);
@@ -558,9 +568,11 @@ public partial class MainForm
         nCrossOpacity.SetBounds(686, 9, 58, 26);
         nCrossOpacity.ValueChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.OpacityPct = (int)nCrossOpacity.Value;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
         };
         pCross.Controls.Add(nCrossOpacity);
@@ -577,10 +589,12 @@ public partial class MainForm
         cmbStyle.SetBounds(58, 54, 180, 26);
         cmbStyle.SelectedIndexChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.StyleIndex = cmbStyle.SelectedIndex;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
-            if (!suppressSettingsSave) toast.ShowText("准星样式：" + cmbStyle.Text);
+            toast.ShowText("准星样式：" + cmbStyle.Text);
+            SyncCrossPresetUiState();
             SaveSettings();
             RefreshUi(true);
         };
@@ -597,9 +611,11 @@ public partial class MainForm
         nThick.SetBounds(306, 54, 56, 26);
         nThick.ValueChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.Thickness = (int)nThick.Value;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
         };
         pCross.Controls.Add(nThick);
@@ -615,9 +631,11 @@ public partial class MainForm
         nLen.SetBounds(428, 54, 56, 26);
         nLen.ValueChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.Length = (int)nLen.Value;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
         };
         pCross.Controls.Add(nLen);
@@ -633,9 +651,11 @@ public partial class MainForm
         nGap.SetBounds(550, 54, 56, 26);
         nGap.ValueChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.Gap = (int)nGap.Value;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
         };
         pCross.Controls.Add(nGap);
@@ -651,12 +671,189 @@ public partial class MainForm
         nDot.SetBounds(682, 54, 56, 26);
         nDot.ValueChanged += delegate
         {
+            if (suppressSettingsSave) return;
             overlay.DotSize = (int)nDot.Value;
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
             SaveSettings();
         };
         pCross.Controls.Add(nDot);
+
+        crossPreview = new CrosshairPreview(overlay);
+        crossPreview.SetBounds(8, 96, 210, 210);
+        crossPreview.Cursor = Cursors.Hand;
+        crossPreview.Click += delegate
+        {
+            overlay.CycleColor();
+            suppressSettingsSave = true;
+            if (cmbColor != null) cmbColor.SelectedIndex = overlay.ColorIndex;
+            suppressSettingsSave = false;
+            crossPreview.Invalidate();
+            SyncCrossPresetUiState();
+            SaveSettings();
+            RefreshUi(true);
+        };
+        pCross.Controls.Add(crossPreview);
+
+        PaintEventHandler drawCardBorder = delegate(object snd, PaintEventArgs pe)
+        {
+            var pnl = (Panel)snd;
+            pe.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var pen = new Pen(ThemePalette.BorderSubtle, 1f))
+                Native.DrawRoundedRect(pe.Graphics, pen, new Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1), 8);
+        };
+
+        // 卡片 1：准星多方案预设卡片条
+        var cardPreset = new Panel();
+        cardPreset.Tag = "rx-surface-card";
+        cardPreset.BackColor = ThemePalette.SurfaceAlt;
+        cardPreset.SetBounds(230, 96, 514, 112);
+        cardPreset.Paint += drawCardBorder;
+        pCross.Controls.Add(cardPreset);
+        cardCrossPreset = cardPreset;
+
+        var lblPresetHead = new Label();
+        lblPresetHead.Text = "准星方案";
+        lblPresetHead.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
+        lblPresetHead.SetBounds(10, 6, 68, 20);
+        cardPreset.Controls.Add(lblPresetHead);
+
+        var lblPresetSub = new Label();
+        lblPresetSub.Text = "单击切换 · 右键管理";
+        lblPresetSub.Font = TrackFont("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
+        lblPresetSub.ForeColor = Color.Gray;
+        lblPresetSub.SetBounds(80, 8, 140, 18);
+        cardPreset.Controls.Add(lblPresetSub);
+
+        btnCrossPresetSave = new Button();
+        btnCrossPresetSave.Text = "保存覆盖";
+        btnCrossPresetSave.Font = TrackFont("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
+        btnCrossPresetSave.SetBounds(354, 4, 78, 24);
+        btnCrossPresetSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        btnCrossPresetSave.Click += delegate { SaveCurrentToActiveCrossPreset(); };
+        cardPreset.Controls.Add(btnCrossPresetSave);
+
+        btnCrossPresetAdd = new Button();
+        btnCrossPresetAdd.Text = "＋ 新建";
+        btnCrossPresetAdd.Font = TrackFont("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+        btnCrossPresetAdd.BackColor = Color.FromArgb(228, 242, 255);
+        btnCrossPresetAdd.ForeColor = Color.FromArgb(24, 64, 128);
+        btnCrossPresetAdd.SetBounds(438, 4, 66, 24);
+        btnCrossPresetAdd.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        btnCrossPresetAdd.Click += delegate { AddCrossPresetFromCurrent(); };
+        cardPreset.Controls.Add(btnCrossPresetAdd);
+
+        crossPresetStrip = new CrosshairPresetStrip();
+        crossPresetStrip.Presets = crossPresets;
+        crossPresetStrip.ActiveIndex = activeCrossPresetIdx;
+        crossPresetStrip.SetBounds(8, 32, 498, 74);
+        crossPresetStrip.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        crossPresetStrip.PresetClicked += delegate(int idx) { ApplyCrossPreset(idx, false); };
+        crossPresetStrip.PresetContextRequested += delegate(int idx, Point pt) { ShowCrossPresetContextMenu(idx, pt); };
+        cardPreset.Controls.Add(crossPresetStrip);
+
+        // 卡片 2：中心位置微调
+        var cardOffset = new Panel();
+        cardOffset.Tag = "rx-surface-card";
+        cardOffset.BackColor = ThemePalette.SurfaceAlt;
+        cardOffset.SetBounds(230, 216, 514, 90);
+        cardOffset.Paint += drawCardBorder;
+        pCross.Controls.Add(cardOffset);
+        cardCrossOffset = cardOffset;
+
+        var lblOffHead = new Label();
+        lblOffHead.Text = "中心位置微调";
+        lblOffHead.Font = TrackFont("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
+        lblOffHead.SetBounds(10, 6, 108, 20);
+        cardOffset.Controls.Add(lblOffHead);
+
+        lblCrossOffBadge = new Label();
+        lblCrossOffBadge.Text = "已居中 (0, 0)";
+        lblCrossOffBadge.Font = TrackFont("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
+        lblCrossOffBadge.ForeColor = Color.Gray;
+        lblCrossOffBadge.TextAlign = ContentAlignment.MiddleRight;
+        lblCrossOffBadge.SetBounds(340, 7, 164, 18);
+        lblCrossOffBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        cardOffset.Controls.Add(lblCrossOffBadge);
+
+        var tipOff = new ToolTip(uiComponents);
+        tipOff.InitialDelay = 300;
+        string[] stepLbls = { "←", "↑", "•", "↓", "→" };
+        int[] stepDx = { -1, 0, 0, 0, 1 };
+        int[] stepDy = { 0, -1, 0, 1, 0 };
+        string[] stepTips = { "向左微调 1px", "向上微调 1px", "水平/垂直偏移归零", "向下微调 1px", "向右微调 1px" };
+        for (int si = 0; si < stepLbls.Length; si++)
+        {
+            int dx = stepDx[si], dy = stepDy[si];
+            bool isCenterBtn = (dx == 0 && dy == 0);
+            var sb = new Button();
+            sb.Text = stepLbls[si];
+            sb.Font = TrackFont("Microsoft YaHei UI", 9f, isCenterBtn ? FontStyle.Bold : FontStyle.Regular);
+            sb.SetBounds(10 + si * 29, 32, 26, 26);
+            sb.Click += delegate
+            {
+                if (isCenterBtn) ResetCrossOffset();
+                else AdjustCrossOffset(dx, dy);
+            };
+            tipOff.SetToolTip(sb, stepTips[si]);
+            cardOffset.Controls.Add(sb);
+        }
+
+        var lblOffX = new Label();
+        lblOffX.Text = "X:";
+        lblOffX.SetBounds(166, 35, 18, 20);
+        cardOffset.Controls.Add(lblOffX);
+
+        nCrossOffX = new NumericUpDown();
+        nCrossOffX.Minimum = Overlay.OffsetMin; nCrossOffX.Maximum = Overlay.OffsetMax;
+        nCrossOffX.Value = Overlay.ClampOffset(overlay.OffsetX);
+        nCrossOffX.SetBounds(186, 33, 52, 26);
+        nCrossOffX.ValueChanged += delegate
+        {
+            if (suppressSettingsSave) return;
+            overlay.OffsetX = Overlay.ClampOffset((int)nCrossOffX.Value);
+            overlay.CenterAndRedraw();
+            if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
+            SaveSettings();
+        };
+        cardOffset.Controls.Add(nCrossOffX);
+
+        var lblOffY = new Label();
+        lblOffY.Text = "Y:";
+        lblOffY.SetBounds(248, 35, 18, 20);
+        cardOffset.Controls.Add(lblOffY);
+
+        nCrossOffY = new NumericUpDown();
+        nCrossOffY.Minimum = Overlay.OffsetMin; nCrossOffY.Maximum = Overlay.OffsetMax;
+        nCrossOffY.Value = Overlay.ClampOffset(overlay.OffsetY);
+        nCrossOffY.SetBounds(268, 33, 52, 26);
+        nCrossOffY.ValueChanged += delegate
+        {
+            if (suppressSettingsSave) return;
+            overlay.OffsetY = Overlay.ClampOffset((int)nCrossOffY.Value);
+            overlay.CenterAndRedraw();
+            if (crossPreview != null) crossPreview.Invalidate();
+            SyncCrossPresetUiState();
+            SaveSettings();
+        };
+        cardOffset.Controls.Add(nCrossOffY);
+
+        var btnCrossOffReset = new Button();
+        btnCrossOffReset.Text = "归零";
+        btnCrossOffReset.SetBounds(330, 32, 58, 26);
+        btnCrossOffReset.Click += delegate { ResetCrossOffset(); };
+        cardOffset.Controls.Add(btnCrossOffReset);
+
+        var lblOffHint = new Label();
+        lblOffHint.Text = "适配不同游戏或分辨率下的 1~2px 中心偏差，调整后屏幕准星实时移动";
+        lblOffHint.Font = TrackFont("Microsoft YaHei UI", 8.2f, FontStyle.Regular);
+        lblOffHint.ForeColor = Color.Gray;
+        lblOffHint.AutoEllipsis = true;
+        lblOffHint.SetBounds(10, 65, 494, 18);
+        lblOffHint.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        cardOffset.Controls.Add(lblOffHint);
 
         btnCrossImg = new Button();
         btnCrossImg.Text = "导入准星图片…";
@@ -679,27 +876,260 @@ public partial class MainForm
         lblCrossImg = new Label();
         lblCrossImg.Text = "当前用内置 32-bit 矢量样式（导入 PNG 将完整保留透明羽化与光晕）";
         lblCrossImg.ForeColor = Color.FromArgb(90, 100, 114);
+        lblCrossImg.AutoEllipsis = true;
         lblCrossImg.SetBounds(352, 324, 480, 22);
         pCross.Controls.Add(lblCrossImg);
 
-        crossPreview = new CrosshairPreview(overlay);
-        crossPreview.SetBounds(8, 96, 210, 210);
-        crossPreview.Cursor = Cursors.Hand;
-        crossPreview.Click += delegate
-        {
-            overlay.CycleColor();
-            if (cmbColor != null) cmbColor.SelectedIndex = overlay.ColorIndex;
-            crossPreview.Invalidate();
-            SaveSettings();
-            RefreshUi(true);
-        };
-        pCross.Controls.Add(crossPreview);
-
         lblCrossHint = new Label();
         lblCrossHint.ForeColor = Color.FromArgb(80, 90, 102);
-        lblCrossHint.SetBounds(234, 98, 560, 190);
+        lblCrossHint.SetBounds(8, 358, 736, 48);
         pCross.Controls.Add(lblCrossHint);
+        SyncCrossPresetUiState();
         return pCross;
+    }
+
+    void LayoutCrossPanel()
+    {
+        if (pCrossPanel == null || pCrossPanel.IsDisposed) return;
+        int W = pCrossPanel.ClientSize.Width;
+        if (W < 300) return;
+        int cw = Math.Max(416, Math.Min(600, W - 238));
+        if (cardCrossPreset != null) cardCrossPreset.SetBounds(230, 96, cw, 112);
+        if (cardCrossOffset != null) cardCrossOffset.SetBounds(230, 216, cw, 90);
+        if (lblCrossImg != null) lblCrossImg.Width = Math.Max(200, W - 360);
+        if (lblCrossHint != null) lblCrossHint.SetBounds(8, 358, Math.Max(360, W - 16), 48);
+    }
+
+    void AdjustCrossOffset(int dx, int dy)
+    {
+        int nx = Overlay.ClampOffset(overlay.OffsetX + dx);
+        int ny = Overlay.ClampOffset(overlay.OffsetY + dy);
+        ApplyCrossOffsetValues(nx, ny);
+    }
+
+    void ResetCrossOffset()
+    {
+        if (overlay.OffsetX == 0 && overlay.OffsetY == 0)
+        {
+            toast.ShowText("准星已处于中心 (0, 0)");
+            return;
+        }
+        ApplyCrossOffsetValues(0, 0);
+        toast.ShowText("准星偏移已归零 (0, 0)");
+    }
+
+    void ApplyCrossOffsetValues(int ox, int oy)
+    {
+        suppressSettingsSave = true;
+        try
+        {
+            overlay.OffsetX = Overlay.ClampOffset(ox);
+            overlay.OffsetY = Overlay.ClampOffset(oy);
+            if (nCrossOffX != null) nCrossOffX.Value = overlay.OffsetX;
+            if (nCrossOffY != null) nCrossOffY.Value = overlay.OffsetY;
+        }
+        finally { suppressSettingsSave = false; }
+        overlay.CenterAndRedraw();
+        if (crossPreview != null) crossPreview.Invalidate();
+        SyncCrossPresetUiState();
+        SaveSettings();
+    }
+
+    void SyncCrossPresetUiState()
+    {
+        if (overlay == null) return;
+        int ox = Overlay.ClampOffset(overlay.OffsetX);
+        int oy = Overlay.ClampOffset(overlay.OffsetY);
+        if (lblCrossOffBadge != null)
+        {
+            bool zero = (ox == 0 && oy == 0);
+            lblCrossOffBadge.Text = zero
+                ? "已居中 (0, 0)"
+                : ("偏移 " + (ox >= 0 ? "+" : "") + ox + ", " + (oy >= 0 ? "+" : "") + oy + " px");
+            SetDynamicLabelColor(lblCrossOffBadge, zero
+                ? Color.FromArgb(110, 122, 138)
+                : Color.FromArgb(37, 99, 235));
+        }
+
+        if (crossPresets == null || crossPresets.Count == 0)
+            crossPresets = CrosshairPreset.CreateDefaultPresets();
+        if (activeCrossPresetIdx < 0 || activeCrossPresetIdx >= crossPresets.Count)
+            activeCrossPresetIdx = 0;
+
+        bool exactMatch = (activeCrossPresetIdx >= 0 && activeCrossPresetIdx < crossPresets.Count)
+            && crossPresets[activeCrossPresetIdx].MatchesOverlay(overlay);
+        if (crossPresetStrip != null)
+        {
+            crossPresetStrip.Presets = crossPresets;
+            crossPresetStrip.ActiveIndex = activeCrossPresetIdx;
+            crossPresetStrip.IsActiveModified = !exactMatch;
+            crossPresetStrip.Invalidate();
+        }
+        if (btnCrossPresetSave != null)
+        {
+            btnCrossPresetSave.Text = exactMatch ? "已同步" : "保存覆盖*";
+            btnCrossPresetSave.Enabled = (crossPresets.Count > 0);
+        }
+        if (btnCrossPresetAdd != null)
+        {
+            btnCrossPresetAdd.Enabled = (crossPresets.Count < 6);
+        }
+    }
+
+    void ApplyCrossPreset(int idx, bool silent)
+    {
+        if (crossPresets == null || idx < 0 || idx >= crossPresets.Count) return;
+        CrosshairPreset p = crossPresets[idx];
+        activeCrossPresetIdx = idx;
+
+        suppressSettingsSave = true;
+        try
+        {
+            p.ApplyScalarToOverlay(overlay);
+            if (cmbStyle != null) cmbStyle.SelectedIndex = overlay.StyleIndex;
+            if (cmbColor != null) cmbColor.SelectedIndex = overlay.ColorIndex;
+            if (nThick != null) nThick.Value = overlay.Thickness;
+            if (nLen != null) nLen.Value = overlay.Length;
+            if (nGap != null) nGap.Value = overlay.Gap;
+            if (nDot != null) nDot.Value = overlay.DotSize;
+            if (nCrossOutline != null) nCrossOutline.Value = overlay.OutlineWidth;
+            if (nCrossOpacity != null) nCrossOpacity.Value = overlay.OpacityPct;
+            if (nCrossOffX != null) nCrossOffX.Value = overlay.OffsetX;
+            if (nCrossOffY != null) nCrossOffY.Value = overlay.OffsetY;
+
+            string wantImg = p.CustomImagePath ?? "";
+            if (string.IsNullOrEmpty(wantImg))
+            {
+                if (overlay.CustomImage != null) { try { overlay.CustomImage.Dispose(); } catch { } }
+                overlay.CustomImage = null;
+                overlay.CustomImagePath = "";
+                if (lblCrossImg != null) lblCrossImg.Text = "当前用内置矢量样式（可导入 PNG 做自定义准星）";
+            }
+            else if (!string.Equals(wantImg, overlay.CustomImagePath, StringComparison.OrdinalIgnoreCase)
+                || overlay.CustomImage == null)
+            {
+                Bitmap loaded = File.Exists(wantImg) ? Overlay.PrepareCrosshairImage(wantImg) : null;
+                if (overlay.CustomImage != null) { try { overlay.CustomImage.Dispose(); } catch { } }
+                if (loaded != null)
+                {
+                    overlay.CustomImage = loaded;
+                    overlay.CustomImagePath = wantImg;
+                    if (lblCrossImg != null)
+                        lblCrossImg.Text = "自定义准星：" + Path.GetFileName(wantImg)
+                            + "（原图 " + loaded.Width + "×" + loaded.Height + "，可通过“臂长+间隙”调整大小）";
+                }
+                else
+                {
+                    overlay.CustomImage = null;
+                    overlay.CustomImagePath = "";
+                    if (lblCrossImg != null) lblCrossImg.Text = "当前用内置矢量样式（可导入 PNG 做自定义准星）";
+                    if (!silent) toast.ShowText("方案内图片不存在，已切回内置矢量样式");
+                }
+            }
+        }
+        finally { suppressSettingsSave = false; }
+
+        overlay.CenterAndRedraw();
+        if (crossPreview != null) crossPreview.Invalidate();
+        SyncCrossPresetUiState();
+        if (!silent)
+        {
+            SaveSettings();
+            toast.ShowText("已切换准星方案：" + p.Name);
+        }
+        RefreshUi(true);
+    }
+
+    void SaveCurrentToActiveCrossPreset()
+    {
+        if (crossPresets == null || crossPresets.Count == 0) return;
+        if (activeCrossPresetIdx < 0 || activeCrossPresetIdx >= crossPresets.Count) activeCrossPresetIdx = 0;
+        string keepName = crossPresets[activeCrossPresetIdx].Name;
+        crossPresets[activeCrossPresetIdx] = CrosshairPreset.FromOverlay(keepName, overlay);
+        SyncCrossPresetUiState();
+        SaveSettings();
+        toast.ShowText("已更新准星方案：" + keepName);
+    }
+
+    void AddCrossPresetFromCurrent()
+    {
+        if (crossPresets == null) crossPresets = CrosshairPreset.CreateDefaultPresets();
+        if (crossPresets.Count >= 6)
+        {
+            toast.ShowText("最多保存 6 套准星方案（可右键旧方案覆盖或删除）");
+            return;
+        }
+        string defName = string.IsNullOrEmpty(overlay.CustomImagePath)
+            ? Overlay.Styles[overlay.StyleIndex]
+            : Path.GetFileNameWithoutExtension(overlay.CustomImagePath);
+        string nm = PromptText("新建准星方案", "输入方案名称（将保存当前准星与微调偏移）：", defName);
+        if (nm == null) return;
+        nm = nm.Trim();
+        if (nm.Length == 0) return;
+        crossPresets.Add(CrosshairPreset.FromOverlay(nm, overlay));
+        activeCrossPresetIdx = crossPresets.Count - 1;
+        SyncCrossPresetUiState();
+        SaveSettings();
+        toast.ShowText("已新建准星方案：" + nm);
+    }
+
+    void ShowCrossPresetContextMenu(int idx, Point screenPt)
+    {
+        if (crossPresets == null || idx < 0 || idx >= crossPresets.Count) return;
+        var cms = new ContextMenuStrip();
+        cms.Items.Add("切换到该方案", null, delegate { ApplyCrossPreset(idx, false); });
+        cms.Items.Add("用当前配置覆盖保存", null, delegate
+        {
+            string nm = crossPresets[idx].Name;
+            crossPresets[idx] = CrosshairPreset.FromOverlay(nm, overlay);
+            activeCrossPresetIdx = idx;
+            SyncCrossPresetUiState();
+            SaveSettings();
+            toast.ShowText("已覆盖准星方案：" + nm);
+        });
+        cms.Items.Add("重命名…", null, delegate
+        {
+            string nm = PromptText("重命名准星方案", "输入新方案名称：", crossPresets[idx].Name);
+            if (nm == null) return;
+            nm = nm.Trim();
+            if (nm.Length == 0) return;
+            crossPresets[idx].Name = nm;
+            SyncCrossPresetUiState();
+            SaveSettings();
+        });
+        cms.Items.Add(new ToolStripSeparator());
+        var miDel = new ToolStripMenuItem("删除该方案", null, delegate
+        {
+            if (crossPresets.Count <= 1)
+            {
+                toast.ShowText("至少保留 1 套准星方案");
+                return;
+            }
+            string oldName = crossPresets[idx].Name;
+            crossPresets.RemoveAt(idx);
+            if (activeCrossPresetIdx == idx)
+                ApplyCrossPreset(Math.Min(idx, crossPresets.Count - 1), true);
+            else if (activeCrossPresetIdx > idx)
+                activeCrossPresetIdx--;
+            SyncCrossPresetUiState();
+            SaveSettings();
+            toast.ShowText("已删除准星方案：" + oldName);
+        });
+        miDel.Enabled = (crossPresets.Count > 1);
+        cms.Items.Add(miDel);
+        cms.Items.Add("恢复默认 4 套方案", null, delegate
+        {
+            if (MessageBox.Show("将重置准星方案列表为默认的 4 套样式，确定吗？", "恢复默认方案",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            crossPresets = CrosshairPreset.CreateDefaultPresets();
+            ApplyCrossPreset(0, false);
+        });
+        cms.Closed += delegate
+        {
+            SafeBeginInvoke(delegate { try { cms.Dispose(); } catch { } });
+        };
+        cms.Show(screenPt);
     }
 
     Panel CreateTimerPanel(Control page, int topY)
@@ -1984,6 +2414,16 @@ public partial class MainForm
             if (string.IsNullOrEmpty(settingsPath) || !File.Exists(settingsPath)) return;
             suppressSettingsSave = true;
             suppressTimerCtrl = true;
+            closeToTrayOn = false;
+            overlay.OffsetX = 0;
+            overlay.OffsetY = 0;
+            activeCrossPresetIdx = 0;
+#if ADMIN_EDITION
+            mySteamName = "";
+            onlinePickerAddr = "";
+            onlinePickerHideBots = true;
+            onlinePickerSortMode = 0;
+#endif
             bool hasTimerChains = false;
             bool hasCustomChain = false;
             bool hasHotkey8 = false;
@@ -2027,6 +2467,16 @@ public partial class MainForm
                     }
                     continue;
                 }
+                if (k == "MySteamName")
+                {
+                    mySteamName = v;
+                    continue;
+                }
+                if (k == "OnlinePickerAddr")
+                {
+                    onlinePickerAddr = v;
+                    continue;
+                }
 #endif
                 if (k == "TimerChains")
                 {
@@ -2043,6 +2493,11 @@ public partial class MainForm
                 if (k == "TimerPresets") continue;
                 if (k == "UpdateUrl") { updateUrl = v; continue; }
                 if (k == "AutoUpdate") { autoUpdateOn = (v == "1"); continue; }
+                if (k == "CrossPresets")
+                {
+                    crossPresets = CrosshairPreset.DeserializePresets(v);
+                    continue;
+                }
                 if (k == "CrossImg")
                 {
                     crossImgToLoad = v;
@@ -2104,6 +2559,25 @@ public partial class MainForm
                     overlay.OpacityPct = iv;
                     if (nCrossOpacity != null) nCrossOpacity.Value = iv;
                 }
+                else if (k == "CrossOffsetX")
+                {
+                    overlay.OffsetX = Overlay.ClampOffset(iv);
+                    if (nCrossOffX != null) nCrossOffX.Value = overlay.OffsetX;
+                }
+                else if (k == "CrossOffsetY")
+                {
+                    overlay.OffsetY = Overlay.ClampOffset(iv);
+                    if (nCrossOffY != null) nCrossOffY.Value = overlay.OffsetY;
+                }
+                else if (k == "CrossPresetIdx" && iv >= 0)
+                {
+                    activeCrossPresetIdx = iv;
+                }
+                else if (k == "CloseToTray")
+                {
+                    closeToTrayOn = (iv != 0);
+                    if (chkCloseToTray != null) chkCloseToTray.Checked = closeToTrayOn;
+                }
                 else if (k == "TimerUseCard")
                 {
                     timerUseCard = (iv != 0);
@@ -2121,6 +2595,14 @@ public partial class MainForm
                 else if (k == "PaletteDock" && iv >= 0 && iv <= 2)
                 {
                     paletteDockMode = iv;
+                }
+                else if (k == "OnlinePickerHideBots")
+                {
+                    onlinePickerHideBots = (iv != 0);
+                }
+                else if (k == "OnlinePickerSort" && iv >= 0 && iv <= 2)
+                {
+                    onlinePickerSortMode = iv;
                 }
 #endif
                 else if (k == "TimerPresetIdx")
@@ -2232,8 +2714,20 @@ public partial class MainForm
             SyncTimerOverlay(true);
             UpdateTimerButtonsStyle();
             UpdateTimerUi();
+            if (crossPresets == null || crossPresets.Count == 0)
+                crossPresets = CrosshairPreset.CreateDefaultPresets();
+            if (activeCrossPresetIdx < 0 || activeCrossPresetIdx >= crossPresets.Count)
+                activeCrossPresetIdx = 0;
+            if (nCrossOffX != null) nCrossOffX.Value = Overlay.ClampOffset(overlay.OffsetX);
+            if (nCrossOffY != null) nCrossOffY.Value = Overlay.ClampOffset(overlay.OffsetY);
+            if (chkCloseToTray != null) chkCloseToTray.Checked = closeToTrayOn;
+            UpdateTrayIconVisibility();
+            SyncCrossPresetUiState();
             overlay.Invalidate();
             if (crossPreview != null) crossPreview.Invalidate();
+#if ADMIN_EDITION
+            SyncSettingsPageUi();
+#endif
         }
         catch (Exception ex) { Native.Log("settings load: " + ex.Message); }
         finally { suppressTimerCtrl = false; suppressSettingsSave = false; }
@@ -2268,6 +2762,11 @@ public partial class MainForm
             sb.Append("DotSize=").Append(overlay.DotSize).Append("\r\n");
             sb.Append("CrossOutline=").Append(overlay.OutlineWidth).Append("\r\n");
             sb.Append("CrossOpacity=").Append(overlay.OpacityPct).Append("\r\n");
+            sb.Append("CrossOffsetX=").Append(Overlay.ClampOffset(overlay.OffsetX)).Append("\r\n");
+            sb.Append("CrossOffsetY=").Append(Overlay.ClampOffset(overlay.OffsetY)).Append("\r\n");
+            sb.Append("CrossPresetIdx=").Append(activeCrossPresetIdx).Append("\r\n");
+            sb.Append("CrossPresets=").Append(CrosshairPreset.SerializePresets(crossPresets)).Append("\r\n");
+            sb.Append("CloseToTray=").Append(closeToTrayOn ? 1 : 0).Append("\r\n");
             if (cmbSpeed != null) sb.Append("SpeedIndex=").Append(cmbSpeed.SelectedIndex).Append("\r\n");
             if (chkOcr != null) sb.Append("OcrOn=").Append(chkOcr.Checked ? 1 : 0).Append("\r\n");
             if (overlay != null && !string.IsNullOrEmpty(overlay.CustomImagePath))
@@ -2295,13 +2794,24 @@ public partial class MainForm
             sb.Append("PaletteDock=").Append(paletteDockMode).Append("\r\n");
             if (recentTargets.Count > 0)
                 sb.Append("RecentTargets=").Append(string.Join("|", recentTargets.ToArray())).Append("\r\n");
+            if (!string.IsNullOrEmpty(mySteamName))
+                sb.Append("MySteamName=").Append(mySteamName).Append("\r\n");
+            if (!string.IsNullOrEmpty(onlinePickerAddr))
+                sb.Append("OnlinePickerAddr=").Append(onlinePickerAddr).Append("\r\n");
+            sb.Append("OnlinePickerHideBots=").Append(onlinePickerHideBots ? 1 : 0).Append("\r\n");
+            sb.Append("OnlinePickerSort=").Append(onlinePickerSortMode).Append("\r\n");
 #endif
             sb.Append("ThemeMode=").Append(themeMode).Append("\r\n");
             if (!string.IsNullOrEmpty(updateUrl)) sb.Append("UpdateUrl=").Append(updateUrl).Append("\r\n");
 #if ADMIN_EDITION
             // 版本库地址与密钥也要写回，否则改任何设置都会把它们抹掉
             if (!string.IsNullOrEmpty(hubUrl)) sb.Append("HubUrl=").Append(hubUrl).Append("\r\n");
-            if (!string.IsNullOrEmpty(hubKey)) sb.Append("HubKey=").Append(hubKey).Append("\r\n");
+            if (!string.IsNullOrEmpty(hubKey))
+            {
+                string encKey = ProtectHubKey(hubKey);
+                if (!string.IsNullOrEmpty(encKey)) sb.Append("HubKeyEnc=").Append(encKey).Append("\r\n");
+                else sb.Append("HubKey=").Append(hubKey).Append("\r\n");
+            }
 #endif
             // 收藏轮询的勾选偏好；一个都没勾也要写（表示"用户就是要全不选"）
             sb.Append("Checked=");
@@ -2315,7 +2825,7 @@ public partial class MainForm
             sb.Append("\r\n");
             AtomicWriteText(settingsPath, sb.ToString());
         }
-        catch { }
+        catch (Exception ex) { Native.LogWarn("SaveSettings", ex); }
     }
 
     // ---------- 收藏夹 ----------
@@ -2867,6 +3377,9 @@ public partial class MainForm
         autoOn = true;
         multiIdx = 0;
         currentTargetAddr = targets[0];
+#if ADMIN_EDITION
+        onlinePickerAddr = currentTargetAddr;
+#endif
 
         IntPtr gw = Native.FindGameWindow();
         if (gw != IntPtr.Zero)
@@ -2914,78 +3427,154 @@ public partial class MainForm
         }
     }
 
-    // ===== Windows 自带 OCR（后台非阻塞 + 引擎缓存 + 严格释放）=====
+    // ===== Windows 自带 OCR（后台非阻塞 + 引擎缓存 + 无竞态 TaskCompletionSource 等待 + 零 PNG 直传）=====
     static T WaitOp<T>(Windows.Foundation.IAsyncOperation<T> op, int timeoutMs)
     {
         if (op == null) return default(T);
-        using (var done = new ManualResetEventSlim(false))
+        var tcs = new TaskCompletionSource<T>();
+        op.Completed = delegate(Windows.Foundation.IAsyncOperation<T> o, Windows.Foundation.AsyncStatus s)
         {
-            T result = default(T);
-            op.Completed = delegate(Windows.Foundation.IAsyncOperation<T> o, Windows.Foundation.AsyncStatus s)
+            try
             {
-                try
+                if (s == Windows.Foundation.AsyncStatus.Completed)
                 {
-                    if (s == Windows.Foundation.AsyncStatus.Completed)
-                        result = o.GetResults();
+                    T r = o.GetResults();
+                    if (!tcs.TrySetResult(r))
+                    {
+                        var disp = r as IDisposable;
+                        if (disp != null) { try { disp.Dispose(); } catch { } }
+                    }
                 }
-                catch { }
-                finally
+                else
                 {
-                    try { done.Set(); } catch { }
+                    tcs.TrySetResult(default(T));
                 }
-            };
-            if (!done.Wait(timeoutMs))
-            {
-                try { op.Cancel(); } catch { }
             }
-            return result;
+            catch (Exception ex)
+            {
+                Native.LogWarn("WaitOp", ex);
+                tcs.TrySetResult(default(T));
+            }
+        };
+        try
+        {
+            if (!tcs.Task.Wait(timeoutMs))
+            {
+                tcs.TrySetCanceled();
+                try { op.Cancel(); } catch { }
+                return default(T);
+            }
+            return tcs.Task.Result;
+        }
+        catch (Exception ex)
+        {
+            Native.LogWarn("WaitOpWait", ex);
+            return default(T);
+        }
+    }
+
+    // 位图 → WinRT SoftwareBitmap（LockBits + IMemoryBufferByteAccess 零 PNG、零托管数组直接写入原生缓冲区）
+    internal static SoftwareBitmap CreateSoftwareBitmapFromBitmap(Bitmap bmp, int scale)
+    {
+        if (bmp == null) return null;
+        int w = bmp.Width;
+        int h = bmp.Height;
+        if (w <= 0 || h <= 0) return null;
+
+        Bitmap scaledOwned = null;
+        Bitmap target = bmp;
+        try
+        {
+            int nw = w, nh = h;
+            if (scale > 1)
+            {
+                nw = Math.Max(1, w * scale);
+                nh = Math.Max(1, h * nw / w);
+                scaledOwned = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(scaledOwned))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+                    g.DrawImage(bmp, 0, 0, nw, nh);
+                }
+                target = scaledOwned;
+            }
+
+            SoftwareBitmap sb = new SoftwareBitmap(BitmapPixelFormat.Bgra8, nw, nh, BitmapAlphaMode.Ignore);
+            try
+            {
+                using (BitmapBuffer buffer = sb.LockBuffer(BitmapBufferAccessMode.Write))
+                using (Windows.Foundation.IMemoryBufferReference memRef = buffer.CreateReference())
+                {
+                    BitmapPlaneDescription desc = buffer.GetPlaneDescription(0);
+                    IntPtr dstPtr;
+                    uint cap;
+                    ((IMemoryBufferByteAccess)memRef).GetBuffer(out dstPtr, out cap);
+
+                    int rowBytes = nw * 4;
+                    if (dstPtr == IntPtr.Zero || desc.StartIndex < 0 || desc.Stride < rowBytes
+                        || (long)desc.StartIndex + (long)(nh - 1) * desc.Stride + rowBytes > (long)cap)
+                    {
+                        throw new InvalidOperationException("SoftwareBitmap buffer out of range");
+                    }
+
+                    var rect = new Rectangle(0, 0, nw, nh);
+                    BitmapData bd = target.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                    try
+                    {
+                        if (bd.Stride == rowBytes && desc.Stride == rowBytes && desc.StartIndex == 0)
+                        {
+                            Native.CopyMemory(dstPtr, bd.Scan0, new UIntPtr((ulong)((long)rowBytes * nh)));
+                        }
+                        else
+                        {
+                            for (int y = 0; y < nh; y++)
+                            {
+                                IntPtr srcRow = new IntPtr(bd.Scan0.ToInt64() + (long)y * bd.Stride);
+                                IntPtr dstRow = new IntPtr(dstPtr.ToInt64() + desc.StartIndex + (long)y * desc.Stride);
+                                Native.CopyMemory(dstRow, srcRow, new UIntPtr((ulong)rowBytes));
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        target.UnlockBits(bd);
+                    }
+                }
+                return sb;
+            }
+            catch
+            {
+                try { sb.Dispose(); } catch { }
+                throw;
+            }
+        }
+        finally
+        {
+            if (scaledOwned != null) { try { scaledOwned.Dispose(); } catch { } }
         }
     }
 
     // 位图 → OCR 文本（scale>1 时放大，小字更易识别）
     string OcrBitmapText(Bitmap bmp, int scale)
     {
+        if (bmp == null) return null;
         if (!ocrEngineInitTried)
         {
             ocrEngineInitTried = true;
             try { cachedOcrEngine = OcrEngine.TryCreateFromUserProfileLanguages(); }
-            catch { cachedOcrEngine = null; }
+            catch (Exception ex) { cachedOcrEngine = null; Native.LogWarn("OcrInit", ex); }
         }
         if (cachedOcrEngine == null) return null;
 
-        byte[] png;
-        int w = bmp.Width;
-        int nw = Math.Max(1, w * Math.Max(1, scale));
-        int nh = Math.Max(1, bmp.Height * nw / w);
-        using (var scaled = new Bitmap(bmp, nw, nh))
-        using (var ms = new MemoryStream())
+        using (var sb = CreateSoftwareBitmapFromBitmap(bmp, scale))
         {
-            scaled.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-            png = ms.ToArray();
-        }
+            if (sb == null) return null;
+            var res = WaitOp(cachedOcrEngine.RecognizeAsync(sb), 3000);
+            if (res == null) return null;
 
-        using (var ras = new InMemoryRandomAccessStream())
-        {
-            using (var writer = new DataWriter(ras))
-            {
-                writer.WriteBytes(png);
-                WaitOp(writer.StoreAsync(), 2500);
-                try { writer.DetachStream(); } catch { }
-            }
-            ras.Seek(0);
-
-            var decoder = WaitOp(BitmapDecoder.CreateAsync(ras), 2500);
-            if (decoder == null) return null;
-            using (var sb = WaitOp(decoder.GetSoftwareBitmapAsync(), 2500))
-            {
-                if (sb == null) return null;
-                var res = WaitOp(cachedOcrEngine.RecognizeAsync(sb), 3000);
-                if (res == null) return null;
-
-                var sbText = new StringBuilder();
-                foreach (var line in res.Lines) { sbText.Append(line.Text); sbText.Append('\n'); }
-                return sbText.ToString();
-            }
+            var sbText = new StringBuilder();
+            foreach (var line in res.Lines) { sbText.Append(line.Text); sbText.Append('\n'); }
+            return sbText.ToString();
         }
     }
 
@@ -3037,7 +3626,7 @@ public partial class MainForm
                 return OcrBitmapText(bmp, 3);
             }
         }
-        catch { return null; }
+        catch (Exception ex) { Native.LogWarn("OcrLoadingBand", ex); return null; }
     }
 
     string lastOcrRaw = "";          // 最近一次 OCR 原文（RX_OCR_DUMP=1 时写日志）
@@ -3129,7 +3718,7 @@ public partial class MainForm
         {
             string scene = "fail";
             try { scene = OcrScene(); }
-            catch { scene = "fail"; }
+            catch (Exception ex) { Native.LogWarn("OcrScene", ex); scene = "fail"; }
             finally { Interlocked.Exchange(ref ocrBusy, 0); }
 
             SafeBeginInvoke(delegate

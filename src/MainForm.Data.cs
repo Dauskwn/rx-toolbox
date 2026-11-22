@@ -1266,15 +1266,24 @@ public partial class MainForm
                 label.IndexOf("职业", StringComparison.Ordinal) >= 0);
     }
 
-    // 把命令里的 ^ 换成目标玩家名；名字带空格自动加引号
+    // 目标玩家名含空格或分号时自动包裹双引号，防止在控制台指令中截断参数
+    internal static string QuoteTargetName(string idText)
+    {
+        string idTxt = (idText ?? "").Trim();
+        if (idTxt.Length == 0) return "";
+        if ((idTxt.IndexOf(' ') >= 0 || idTxt.IndexOf(';') >= 0)
+            && !(idTxt.StartsWith("\"") && idTxt.EndsWith("\"")))
+            idTxt = "\"" + idTxt + "\"";
+        return idTxt;
+    }
+
+    // 把命令里的 ^ 换成目标玩家名；名字带空格/分号自动加引号
     static string ApplyTargetName(string raw, string idText)
     {
         if (string.IsNullOrEmpty(raw)) return raw ?? "";
-        string idTxt = (idText ?? "").Trim();
+        string idTxt = QuoteTargetName(idText);
         if (idTxt.Length == 0) return raw;
         if (raw.IndexOf('^') < 0) return raw;
-        if (idTxt.IndexOf(' ') >= 0 && !(idTxt.StartsWith("\"") && idTxt.EndsWith("\"")))
-            idTxt = "\"" + idTxt + "\"";
         return raw.Replace("^", idTxt);
     }
 
@@ -1458,9 +1467,9 @@ public partial class MainForm
             if (c == '{') return ParseObject(s, ref i, depth + 1);
             if (c == '[') return ParseArray(s, ref i, depth + 1);
             if (c == '"') return ParseString(s, ref i);
-            if (c == 't' && i + 4 <= s.Length) { i += 4; return true; }
-            if (c == 'f' && i + 5 <= s.Length) { i += 5; return false; }
-            if (c == 'n' && i + 4 <= s.Length) { i += 4; return null; }
+            if (c == 't' && i + 4 <= s.Length && string.CompareOrdinal(s, i, "true", 0, 4) == 0) { i += 4; return true; }
+            if (c == 'f' && i + 5 <= s.Length && string.CompareOrdinal(s, i, "false", 0, 5) == 0) { i += 5; return false; }
+            if (c == 'n' && i + 4 <= s.Length && string.CompareOrdinal(s, i, "null", 0, 4) == 0) { i += 4; return null; }
             return ParseNumber(s, ref i);
         }
 

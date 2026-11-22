@@ -110,7 +110,8 @@ public enum NavIconKind
     Info,
     Search,
     SidebarToggle,
-    Theme
+    Theme,
+    Settings
 }
 
 /// <summary>
@@ -305,6 +306,20 @@ public static class UiIcons
                             float c = (float)Math.Cos(a), s = (float)Math.Sin(a);
                             g.DrawLine(pen, cx + c * r * 0.72f, cy + s * r * 0.72f, cx + c * r * 0.96f, cy + s * r * 0.96f);
                         }
+                    }
+                    break;
+                }
+                case NavIconKind.Settings:
+                {
+                    float innerR = r * 0.30f;
+                    float midR = r * 0.62f;
+                    g.DrawEllipse(pen, cx - innerR, cy - innerR, innerR * 2f, innerR * 2f);
+                    g.DrawEllipse(pen, cx - midR, cy - midR, midR * 2f, midR * 2f);
+                    for (int k = 0; k < 8; k++)
+                    {
+                        double a = k * Math.PI / 4.0;
+                        float c = (float)Math.Cos(a), s = (float)Math.Sin(a);
+                        g.DrawLine(pen, cx + c * r * 0.65f, cy + s * r * 0.65f, cx + c * r * 0.94f, cy + s * r * 0.94f);
                     }
                     break;
                 }

@@ -420,11 +420,50 @@ public partial class MainForm
             });
     }
 
+    static readonly byte[] HUB_KEY_ENTROPY = Encoding.UTF8.GetBytes("RXToolbox.HubKey.v1");
+
+    internal static string ProtectHubKey(string plain)
+    {
+        if (string.IsNullOrEmpty(plain)) return "";
+        try
+        {
+            byte[] raw = Encoding.UTF8.GetBytes(plain);
+            byte[] enc = System.Security.Cryptography.ProtectedData.Protect(
+                raw, HUB_KEY_ENTROPY, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            return "dpapi:" + Convert.ToBase64String(enc);
+        }
+        catch (Exception ex)
+        {
+            Native.LogWarn("ProtectHubKey", ex);
+            return "";
+        }
+    }
+
+    internal static string UnprotectHubKey(string encoded)
+    {
+        if (string.IsNullOrEmpty(encoded)) return "";
+        if (!encoded.StartsWith("dpapi:", StringComparison.Ordinal)) return encoded;
+        try
+        {
+            byte[] enc = Convert.FromBase64String(encoded.Substring(6));
+            byte[] raw = System.Security.Cryptography.ProtectedData.Unprotect(
+                enc, HUB_KEY_ENTROPY, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(raw);
+        }
+        catch (Exception ex)
+        {
+            Native.LogWarn("UnprotectHubKey", ex);
+            return "";
+        }
+    }
+
     void LoadHubSettings()
     {
         try
         {
             if (string.IsNullOrEmpty(settingsPath) || !File.Exists(settingsPath)) return;
+            string encVal = "";
+            string plainVal = "";
             foreach (string line in File.ReadAllLines(settingsPath, Encoding.UTF8))
             {
                 int eq = line.IndexOf('=');
@@ -432,10 +471,13 @@ public partial class MainForm
                 string k = line.Substring(0, eq).Trim(), v = line.Substring(eq + 1).Trim();
                 if (k == "DevTools") devToolsOn = (v == "1");
                 else if (k == "HubUrl") hubUrl = v;
-                else if (k == "HubKey") hubKey = v;
+                else if (k == "HubKeyEnc") encVal = v;
+                else if (k == "HubKey") plainVal = v;
             }
+            string dec = UnprotectHubKey(encVal);
+            hubKey = !string.IsNullOrEmpty(dec) ? dec : plainVal;
         }
-        catch { }
+        catch (Exception ex) { Native.LogWarn("LoadHubSettings", ex); }
     }
 
     void SaveHubSettings()

@@ -575,7 +575,7 @@ public class WrapList : Control
     bool measuredWithPin = false;
     bool monoMetricsReady = false;
     double monoCwA, monoPadA, monoCwB, monoPadB;
-    Font prevFontA, prevFontB, noteFont, noteFontS, noteFontXS, majorFont, foldHintFont;
+    Font prevFontA, prevFontB, noteFont, noteFontS, noteFontXS, majorFont, foldHintFont, bannerFont, bannerBadgeFont;
     int measuredWidth = -1;
     int scrollY = 0;
     int hoverIdx = -1;
@@ -624,6 +624,8 @@ public class WrapList : Control
         noteFontXS = new Font("Microsoft YaHei UI", 6.2f, FontStyle.Italic);
         majorFont = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold);
         foldHintFont = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
+        bannerFont = new Font("Microsoft YaHei UI", 8.8f, FontStyle.Regular);
+        bannerBadgeFont = new Font("Microsoft YaHei UI", 7.6f, FontStyle.Bold);
         prevFontA = new Font("Consolas", 8.5f, FontStyle.Regular);
         prevFontB = new Font("Consolas", 7.5f, FontStyle.Regular);
 
@@ -655,6 +657,14 @@ public class WrapList : Control
     public bool IsCollapsible(int index)
     {
         return index >= 0 && index < canCollapse.Length && canCollapse[index];
+    }
+
+    public bool IsInfoBanner(int index)
+    {
+        if (index < 0 || index >= Heads.Length || !Heads[index]) return false;
+        if (index < canCollapse.Length && canCollapse[index]) return false;
+        string raw = (index < Labels.Length && Labels[index] != null) ? Labels[index] : "";
+        return !raw.StartsWith("▓");
     }
 
     public bool IsCollapsed(int index)
@@ -962,9 +972,10 @@ public class WrapList : Control
         string rawText = Labels[i] ?? "";
         bool isMajor = isHd && rawText.StartsWith("▓");
         bool isCol = isHd && i < canCollapse.Length && canCollapse[i];
-        Font f = isMajor ? majorFont : (isHd ? HeadFont : Font);
-        int leftPad = isHd ? 14 : (measuredWithPin ? 32 : 18);
-        int tw = w - (isHd ? (isCol ? 146 : 38) : (leftPad + 18));
+        bool isInfoNote = isHd && !isCol && !isMajor;
+        Font f = isMajor ? majorFont : (isInfoNote ? bannerFont : (isHd ? HeadFont : Font));
+        int leftPad = isInfoNote ? 58 : (isHd ? 14 : (measuredWithPin ? 32 : 18));
+        int tw = w - (isInfoNote ? 76 : (isHd ? (isCol ? 146 : 38) : (leftPad + 18)));
         if (tw < 60) tw = 60;
         string text = isMajor ? rawText.Substring(1).Trim() : rawText;
 
@@ -979,7 +990,7 @@ public class WrapList : Control
         {
             Size sz = TextRenderer.MeasureText(measureG, text, f, new Size(tw, 4000),
                 TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
-            h = Math.Max(34, sz.Height + (isHd ? 14 : 12));
+            h = Math.Max(isInfoNote ? 32 : 34, sz.Height + (isInfoNote ? 16 : (isHd ? 14 : 12)));
             if (text.IndexOf('\n') < 0 && sz.Height <= f.Height + 6)
                 titleOneMeasured = true;
         }
@@ -1554,6 +1565,10 @@ public class WrapList : Control
                     using (var headBg = new SolidBrush(dark ? Color.FromArgb(28, 33, 40) : Color.FromArgb(244, 247, 252)))
                     using (var headHoverBg = new SolidBrush(dark ? Color.FromArgb(35, 42, 52) : Color.FromArgb(234, 241, 252)))
                     using (var headAccent = new SolidBrush(dark ? Color.FromArgb(88, 166, 255) : Color.FromArgb(37, 99, 235)))
+                    using (var noteCardBg = new SolidBrush(dark ? Color.FromArgb(40, 33, 22) : Color.FromArgb(255, 250, 237)))
+                    using (var noteCardBorder = new Pen(dark ? Color.FromArgb(88, 66, 36) : Color.FromArgb(238, 214, 162), 1f))
+                    using (var noteCardAccent = new SolidBrush(dark ? Color.FromArgb(230, 170, 72) : Color.FromArgb(217, 119, 6)))
+                    using (var noteBadgeBg = new SolidBrush(dark ? Color.FromArgb(72, 53, 24) : Color.FromArgb(252, 234, 194)))
                     using (var selBg = new SolidBrush(dark ? Color.FromArgb(26, 42, 68) : Color.FromArgb(235, 244, 255)))
                     using (var hoverBg = new SolidBrush(dark ? Color.FromArgb(28, 34, 44) : Color.FromArgb(246, 249, 254)))
                     using (var sepPen = new Pen(dark ? Color.FromArgb(33, 38, 45) : Color.FromArgb(241, 245, 249)))
@@ -1597,8 +1612,21 @@ public class WrapList : Control
                                 bool isHeadHov = isCol && (i == hoverIdx);
                                 string labelText = Labels[i] ?? "";
                                 bool isMajor = isHd && labelText.StartsWith("▓");
+                                bool isInfoNote = isHd && !isCol && !isMajor;
                                 if (isMajor) labelText = labelText.Substring(1).Trim();
-                                if (isHd)
+                                if (isInfoNote)
+                                {
+                                    Rectangle cardRc = new Rectangle(8, y + 3, Math.Max(40, bgW - 16), Math.Max(18, h - 6));
+                                    Native.FillRoundedRect(e.Graphics, noteCardBg, cardRc, 6);
+                                    Native.DrawRoundedRect(e.Graphics, noteCardBorder, new Rectangle(cardRc.X, cardRc.Y, cardRc.Width - 1, cardRc.Height - 1), 6);
+                                    Native.FillRoundedRect(e.Graphics, noteCardAccent, new Rectangle(cardRc.X + 4, cardRc.Y + 5, 3, Math.Max(6, cardRc.Height - 10)), 2);
+                                    Rectangle badgeRc = new Rectangle(cardRc.X + 12, cardRc.Y + 5, 34, 18);
+                                    Native.FillRoundedRect(e.Graphics, noteBadgeBg, badgeRc, 4);
+                                    TextRenderer.DrawText(e.Graphics, "说明", bannerBadgeFont, badgeRc,
+                                        dark ? Color.FromArgb(242, 194, 104) : Color.FromArgb(162, 82, 12),
+                                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+                                }
+                                else if (isHd)
                                 {
                                     Brush hb = isMajor ? (isHeadHov ? majorHoverBg : majorBg) : (isHeadHov ? headHoverBg : headBg);
                                     e.Graphics.FillRectangle(hb, bgRect);
@@ -1614,9 +1642,13 @@ public class WrapList : Control
                                     e.Graphics.FillRectangle(hoverBg, bgRect);
                                 }
 
-                                Font f = isMajor ? majorFont : (isHd ? HeadFont : Font);
+                                Font f = isMajor ? majorFont : (isInfoNote ? bannerFont : (isHd ? HeadFont : Font));
                                 Color c;
-                                if (dark)
+                                if (isInfoNote)
+                                {
+                                    c = dark ? Color.FromArgb(226, 200, 156) : Color.FromArgb(112, 74, 24);
+                                }
+                                else if (dark)
                                 {
                                     c = isMajor ? Color.FromArgb(121, 192, 255) : (isHd ? Color.FromArgb(88, 166, 255)
                                         : (i == Sel ? Color.FromArgb(240, 246, 252) : Color.FromArgb(230, 237, 243)));
@@ -1626,9 +1658,9 @@ public class WrapList : Control
                                     c = isMajor ? Color.FromArgb(20, 52, 96) : (isHd ? Color.FromArgb(8, 88, 160)
                                         : (i == Sel ? Color.FromArgb(12, 34, 64) : Color.FromArgb(30, 41, 59)));
                                 }
-                                int leftPad = isHd ? 14 : 18;
+                                int leftPad = isInfoNote ? 58 : (isHd ? 14 : 18);
 
-                                int rightReserve = isCol ? 132 : 14;
+                                int rightReserve = isCol ? 132 : (isInfoNote ? 18 : 14);
                                 if (isCol)
                                 {
                                     float frac = (i < animFrac.Length) ? animFrac[i] : (isFolded ? 0f : 1f);
@@ -1703,7 +1735,7 @@ public class WrapList : Control
                                 }
 
                                 int titleW = Math.Max(60, r.Width - leftPad - rightReserve);
-                                Rectangle titleRect = new Rectangle(r.X + leftPad, r.Y + 5, titleW, h - 8);
+                                Rectangle titleRect = new Rectangle(r.X + leftPad, isInfoNote ? (r.Y + 7) : (r.Y + 5), titleW, isInfoNote ? Math.Max(16, h - 12) : (h - 8));
                                 bool titleSingle = (i < titleSingleLine.Length && titleSingleLine[i]);
                                 DrawHighlightedTitle(e.Graphics, labelText, f, titleRect, c, !isHd, titleSingle);
 
@@ -1723,7 +1755,8 @@ public class WrapList : Control
                                     }
                                 }
 
-                                e.Graphics.DrawLine(sepPen, 8, r.Bottom - 1, bgW - 8, r.Bottom - 1);
+                                if (!isInfoNote)
+                                    e.Graphics.DrawLine(sepPen, 8, r.Bottom - 1, bgW - 8, r.Bottom - 1);
                             }
                             finally
                             {
@@ -2176,6 +2209,8 @@ public class WrapList : Control
             if (noteFontXS != null) { noteFontXS.Dispose(); noteFontXS = null; }
             if (majorFont != null) { majorFont.Dispose(); majorFont = null; }
             if (foldHintFont != null) { foldHintFont.Dispose(); foldHintFont = null; }
+            if (bannerFont != null) { bannerFont.Dispose(); bannerFont = null; }
+            if (bannerBadgeFont != null) { bannerBadgeFont.Dispose(); bannerBadgeFont = null; }
             if (hover != null) { hover.Dispose(); hover = null; }
         }
         base.Dispose(disposing);
@@ -2444,7 +2479,21 @@ public class CrosshairPreview : Panel
 
         if (Source != null)
         {
-            Source.DrawCrosshair(g, cx, cy);
+            int ox = Overlay.ClampOffset(Source.OffsetX);
+            int oy = Overlay.ClampOffset(Source.OffsetY);
+            Source.DrawCrosshair(g, cx + ox, cy + oy);
+
+            if (ox != 0 || oy != 0)
+            {
+                string offTxt = "偏移 " + (ox >= 0 ? "+" : "") + ox + ", " + (oy >= 0 ? "+" : "") + oy + " px";
+                Size osz = TextRenderer.MeasureText(offTxt, Font, new Size(w, 24), TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+                int pw = Math.Min(w - 12, osz.Width + 10);
+                var pillRect = new Rectangle(w - pw - 6, 6, pw, 18);
+                using (var pillBg = new SolidBrush(Color.FromArgb(180, 15, 23, 42)))
+                    Native.FillRoundedRect(g, pillBg, pillRect, 4);
+                TextRenderer.DrawText(g, offTxt, Font, pillRect, Color.FromArgb(125, 211, 252),
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            }
         }
 
         using (var borderPen = new Pen(ThemePalette.Border, 1f))

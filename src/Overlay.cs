@@ -20,9 +20,17 @@ public class Overlay : Form
     public int OutlineWidth = 1;    // 0..2px 黑色外描边（亮/暗背景全清晰）
     public int OpacityPct = 100;    // 20..100% 不透明度
     public int StyleIndex = 0;
+    public const int OffsetMin = -20;
+    public const int OffsetMax = 20;
+    public int OffsetX = 0, OffsetY = 0;
     // 自定义准星图片（导入 PNG/BMP，保留完整 32-bit 透明通道）；路径为空表示用内置矢量样式
     public Bitmap CustomImage;
     public string CustomImagePath = "";
+
+    public static int ClampOffset(int v)
+    {
+        return Math.Max(OffsetMin, Math.Min(OffsetMax, v));
+    }
 
     int lastLeft = 0, lastTop = 0;
 
@@ -84,8 +92,8 @@ public class Overlay : Form
     public void CenterAndRedraw()
     {
         Rectangle scr = Native.GetTargetScreenBounds();
-        lastLeft = scr.X + (scr.Width - Width) / 2;
-        lastTop = scr.Y + (scr.Height - Height) / 2;
+        lastLeft = scr.X + (scr.Width - Width) / 2 + ClampOffset(OffsetX);
+        lastTop = scr.Y + (scr.Height - Height) / 2 + ClampOffset(OffsetY);
         RedrawLayered();
         if (IsHandleCreated) Native.MakeTopmost(Handle);
     }
@@ -96,8 +104,8 @@ public class Overlay : Form
         try
         {
             Rectangle scr = Native.GetTargetScreenBounds();
-            lastLeft = scr.X + (scr.Width - Width) / 2;
-            lastTop = scr.Y + (scr.Height - Height) / 2;
+            lastLeft = scr.X + (scr.Width - Width) / 2 + ClampOffset(OffsetX);
+            lastTop = scr.Y + (scr.Height - Height) / 2 + ClampOffset(OffsetY);
             int w = Math.Max(32, Width);
             int h = Math.Max(32, Height);
             using (var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb))
@@ -332,6 +340,19 @@ public class Overlay : Form
             if (src != null) try { src.Dispose(); } catch { }
             if (work != null) try { work.Dispose(); } catch { }
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            if (CustomImage != null)
+            {
+                try { CustomImage.Dispose(); } catch { }
+                CustomImage = null;
+            }
+        }
+        base.Dispose(disposing);
     }
 }
 
@@ -870,5 +891,294 @@ public class CountdownOverlay : Form
             if (cachedLabelFont != null) { try { cachedLabelFont.Dispose(); } catch { } cachedLabelFont = null; }
         }
         base.Dispose(disposing);
+    }
+}
+
+public class CrosshairPreset
+{
+    public string Name = "新方案";
+    public int StyleIndex = 0;
+    public int ColorIndex = 0;
+    public int Thickness = 2;
+    public int Length = 9;
+    public int Gap = 5;
+    public int DotSize = 2;
+    public int OutlineWidth = 1;
+    public int OpacityPct = 100;
+    public int OffsetX = 0;
+    public int OffsetY = 0;
+    public string CustomImagePath = "";
+
+    public CrosshairPreset Clone()
+    {
+        var p = new CrosshairPreset();
+        p.Name = Name;
+        p.StyleIndex = StyleIndex;
+        p.ColorIndex = ColorIndex;
+        p.Thickness = Thickness;
+        p.Length = Length;
+        p.Gap = Gap;
+        p.DotSize = DotSize;
+        p.OutlineWidth = OutlineWidth;
+        p.OpacityPct = OpacityPct;
+        p.OffsetX = OffsetX;
+        p.OffsetY = OffsetY;
+        p.CustomImagePath = CustomImagePath ?? "";
+        return p;
+    }
+
+    public void ClampFields()
+    {
+        Name = string.IsNullOrEmpty(Name) ? "新方案" : Name.Trim();
+        if (Name.Length == 0) Name = "新方案";
+        StyleIndex = Math.Max(0, Math.Min(Overlay.Styles.Length - 1, StyleIndex));
+        ColorIndex = Math.Max(0, Math.Min(Overlay.Palette.Length - 1, ColorIndex));
+        Thickness = Math.Max(1, Math.Min(6, Thickness));
+        Length = Math.Max(3, Math.Min(40, Length));
+        Gap = Math.Max(0, Math.Min(30, Gap));
+        DotSize = Math.Max(0, Math.Min(8, DotSize));
+        OutlineWidth = Math.Max(0, Math.Min(2, OutlineWidth));
+        OpacityPct = Math.Max(20, Math.Min(100, OpacityPct));
+        OffsetX = Overlay.ClampOffset(OffsetX);
+        OffsetY = Overlay.ClampOffset(OffsetY);
+        if (CustomImagePath == null) CustomImagePath = "";
+    }
+
+    public static CrosshairPreset FromOverlay(string name, Overlay o)
+    {
+        var p = new CrosshairPreset();
+        p.Name = string.IsNullOrEmpty(name) ? "新方案" : name.Trim();
+        if (o != null)
+        {
+            p.StyleIndex = o.StyleIndex;
+            p.ColorIndex = o.ColorIndex;
+            p.Thickness = o.Thickness;
+            p.Length = o.Length;
+            p.Gap = o.Gap;
+            p.DotSize = o.DotSize;
+            p.OutlineWidth = o.OutlineWidth;
+            p.OpacityPct = o.OpacityPct;
+            p.OffsetX = o.OffsetX;
+            p.OffsetY = o.OffsetY;
+            p.CustomImagePath = o.CustomImagePath ?? "";
+        }
+        p.ClampFields();
+        return p;
+    }
+
+    public void ApplyScalarToOverlay(Overlay o)
+    {
+        if (o == null) return;
+        ClampFields();
+        o.StyleIndex = StyleIndex;
+        o.ColorIndex = ColorIndex;
+        o.Thickness = Thickness;
+        o.Length = Length;
+        o.Gap = Gap;
+        o.DotSize = DotSize;
+        o.OutlineWidth = OutlineWidth;
+        o.OpacityPct = OpacityPct;
+        o.OffsetX = OffsetX;
+        o.OffsetY = OffsetY;
+    }
+
+    public bool MatchesOverlay(Overlay o)
+    {
+        if (o == null) return false;
+        ClampFields();
+        return StyleIndex == o.StyleIndex
+            && ColorIndex == o.ColorIndex
+            && Thickness == o.Thickness
+            && Length == o.Length
+            && Gap == o.Gap
+            && DotSize == o.DotSize
+            && OutlineWidth == o.OutlineWidth
+            && OpacityPct == o.OpacityPct
+            && OffsetX == Overlay.ClampOffset(o.OffsetX)
+            && OffsetY == Overlay.ClampOffset(o.OffsetY)
+            && string.Equals(CustomImagePath ?? "", o.CustomImagePath ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public string DescribeSummary()
+    {
+        ClampFields();
+        string baseDesc = string.IsNullOrEmpty(CustomImagePath)
+            ? (Overlay.Styles[StyleIndex] + " · " + Overlay.ColorNames[ColorIndex] + " · " + OpacityPct + "%")
+            : ("自定义图片(" + Path.GetFileName(CustomImagePath) + ") · " + OpacityPct + "%");
+        if (OffsetX != 0 || OffsetY != 0)
+            baseDesc += " · 偏移(" + (OffsetX >= 0 ? "+" : "") + OffsetX + "," + (OffsetY >= 0 ? "+" : "") + OffsetY + ")";
+        return Name + "：" + baseDesc;
+    }
+
+    public static List<CrosshairPreset> CreateDefaultPresets()
+    {
+        var list = new List<CrosshairPreset>();
+        list.Add(new CrosshairPreset
+        {
+            Name = "步枪十字", StyleIndex = 0, ColorIndex = 0, Thickness = 2, Length = 9, Gap = 5, DotSize = 2, OutlineWidth = 1, OpacityPct = 100
+        });
+        list.Add(new CrosshairPreset
+        {
+            Name = "精准圆点", StyleIndex = 2, ColorIndex = 1, Thickness = 2, Length = 6, Gap = 3, DotSize = 2, OutlineWidth = 1, OpacityPct = 100
+        });
+        list.Add(new CrosshairPreset
+        {
+            Name = "散弹同心", StyleIndex = 4, ColorIndex = 4, Thickness = 2, Length = 12, Gap = 6, DotSize = 2, OutlineWidth = 1, OpacityPct = 90
+        });
+        list.Add(new CrosshairPreset
+        {
+            Name = "经典白十", StyleIndex = 1, ColorIndex = 5, Thickness = 1, Length = 10, Gap = 0, DotSize = 0, OutlineWidth = 1, OpacityPct = 95
+        });
+        return list;
+    }
+
+    public static string SerializePresets(List<CrosshairPreset> list)
+    {
+        if (list == null || list.Count == 0) return "";
+        var sb = new StringBuilder();
+        int cap = Math.Min(6, list.Count);
+        for (int i = 0; i < cap; i++)
+        {
+            CrosshairPreset p = list[i];
+            if (p == null) continue;
+            p.ClampFields();
+            if (sb.Length > 0) sb.Append(';');
+            sb.Append(Uri.EscapeDataString(p.Name)).Append(',')
+              .Append(p.StyleIndex).Append(',')
+              .Append(p.ColorIndex).Append(',')
+              .Append(p.Thickness).Append(',')
+              .Append(p.Length).Append(',')
+              .Append(p.Gap).Append(',')
+              .Append(p.DotSize).Append(',')
+              .Append(p.OutlineWidth).Append(',')
+              .Append(p.OpacityPct).Append(',')
+              .Append(p.OffsetX).Append(',')
+              .Append(p.OffsetY).Append(',')
+              .Append(Uri.EscapeDataString(p.CustomImagePath ?? ""));
+        }
+        return sb.ToString();
+    }
+
+    public static List<CrosshairPreset> DeserializePresets(string raw)
+    {
+        var list = new List<CrosshairPreset>();
+        if (!string.IsNullOrEmpty(raw))
+        {
+            string[] items = raw.Split(';');
+            for (int i = 0; i < items.Length && list.Count < 6; i++)
+            {
+                string one = (items[i] ?? "").Trim();
+                if (one.Length == 0) continue;
+                string[] parts = one.Split(',');
+                if (parts.Length < 11) continue;
+                try
+                {
+                    int st, col, th, ln, gp, dt, ow, op, ox, oy;
+                    if (!int.TryParse(parts[1], out st) || !int.TryParse(parts[2], out col)
+                        || !int.TryParse(parts[3], out th) || !int.TryParse(parts[4], out ln)
+                        || !int.TryParse(parts[5], out gp) || !int.TryParse(parts[6], out dt)
+                        || !int.TryParse(parts[7], out ow) || !int.TryParse(parts[8], out op)
+                        || !int.TryParse(parts[9], out ox) || !int.TryParse(parts[10], out oy))
+                        continue;
+
+                    var p = new CrosshairPreset();
+                    p.Name = Uri.UnescapeDataString(parts[0]);
+                    p.StyleIndex = st;
+                    p.ColorIndex = col;
+                    p.Thickness = th;
+                    p.Length = ln;
+                    p.Gap = gp;
+                    p.DotSize = dt;
+                    p.OutlineWidth = ow;
+                    p.OpacityPct = op;
+                    p.OffsetX = ox;
+                    p.OffsetY = oy;
+                    p.CustomImagePath = parts.Length >= 12 ? Uri.UnescapeDataString(parts[11]) : "";
+                    p.ClampFields();
+                    list.Add(p);
+                }
+                catch { }
+            }
+        }
+        if (list.Count == 0) return CreateDefaultPresets();
+        return list;
+    }
+
+    public static void DrawMiniIcon(Graphics g, CrosshairPreset p, Rectangle box)
+    {
+        if (g == null || p == null || box.Width < 8 || box.Height < 8) return;
+        SmoothingMode oldSm = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using (var wellBg = new SolidBrush(Color.FromArgb(20, 26, 36)))
+            Native.FillRoundedRect(g, wellBg, box, 4);
+        using (var wellEdge = new Pen(Color.FromArgb(52, 62, 76), 1f))
+            Native.DrawRoundedRect(g, wellEdge, new Rectangle(box.X, box.Y, box.Width - 1, box.Height - 1), 4);
+
+        float cx = box.X + box.Width / 2f;
+        float cy = box.Y + box.Height / 2f;
+        float r = Math.Min(box.Width, box.Height) * 0.30f;
+        int cidx = Math.Max(0, Math.Min(Overlay.Palette.Length - 1, p.ColorIndex));
+        Color col = Overlay.Palette[cidx];
+
+        if (!string.IsNullOrEmpty(p.CustomImagePath))
+        {
+            using (var pen = new Pen(Color.FromArgb(125, 211, 252), 1.4f))
+            {
+                g.DrawEllipse(pen, cx - r * 0.85f, cy - r * 0.85f, r * 1.7f, r * 1.7f);
+                g.DrawLine(pen, cx - r * 1.1f, cy, cx - r * 0.45f, cy);
+                g.DrawLine(pen, cx + r * 0.45f, cy, cx + r * 1.1f, cy);
+                g.DrawLine(pen, cx, cy - r * 1.1f, cx, cy - r * 0.45f);
+                g.DrawLine(pen, cx, cy + r * 0.45f, cx, cy + r * 1.1f);
+            }
+            using (var badge = new SolidBrush(Color.FromArgb(56, 189, 248)))
+                g.FillEllipse(badge, box.Right - 6, box.Y + 2, 4, 4);
+            g.SmoothingMode = oldSm;
+            return;
+        }
+
+        using (var pen = new Pen(col, 1.5f))
+        using (var brush = new SolidBrush(col))
+        {
+            switch (p.StyleIndex)
+            {
+                case 0:
+                    g.DrawLine(pen, cx - r, cy, cx - r * 0.38f, cy);
+                    g.DrawLine(pen, cx + r * 0.38f, cy, cx + r, cy);
+                    g.DrawLine(pen, cx, cy - r, cx, cy - r * 0.38f);
+                    g.DrawLine(pen, cx, cy + r * 0.38f, cx, cy + r);
+                    if (p.DotSize > 0) g.FillEllipse(brush, cx - 1.3f, cy - 1.3f, 2.6f, 2.6f);
+                    break;
+                case 1:
+                    g.DrawLine(pen, cx - r, cy, cx + r, cy);
+                    g.DrawLine(pen, cx, cy - r, cx, cy + r);
+                    break;
+                case 2:
+                    g.FillEllipse(brush, cx - r * 0.42f, cy - r * 0.42f, r * 0.84f, r * 0.84f);
+                    break;
+                case 3:
+                {
+                    var pts = new PointF[]
+                    {
+                        new PointF(cx - r * 0.85f, cy - r * 0.45f),
+                        new PointF(cx, cy + r * 0.55f),
+                        new PointF(cx + r * 0.85f, cy - r * 0.45f)
+                    };
+                    g.DrawLines(pen, pts);
+                    break;
+                }
+                case 4:
+                    g.DrawEllipse(pen, cx - r * 0.9f, cy - r * 0.9f, r * 1.8f, r * 1.8f);
+                    g.DrawEllipse(pen, cx - r * 0.42f, cy - r * 0.42f, r * 0.84f, r * 0.84f);
+                    break;
+                default:
+                    g.DrawLine(pen, cx - r, cy, cx - r * 0.35f, cy);
+                    g.DrawLine(pen, cx + r * 0.35f, cy, cx + r, cy);
+                    g.DrawLine(pen, cx, cy + r * 0.35f, cx, cy + r);
+                    if (p.DotSize > 0) g.FillEllipse(brush, cx - 1.2f, cy - 1.2f, 2.4f, 2.4f);
+                    break;
+            }
+        }
+        g.SmoothingMode = oldSm;
     }
 }

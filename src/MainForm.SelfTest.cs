@@ -161,6 +161,46 @@ public partial class MainForm
         chk("目标名：留空不动", ApplyTargetName("!strip ^", "  ") == "!strip ^", "");
         chk("目标名：没有 ^ 不动", ApplyTargetName("stopsound", "X") == "stopsound", "");
         chk("目标名：多个 ^ 全部替换", ApplyTargetName("!cmd ^ ^", "X") == "!cmd X X", ApplyTargetName("!cmd ^ ^", "X"));
+        chk("目标名：含分号自动加引号防控制台断句", ApplyTargetName("!tp ^", "a;b") == "!tp \"a;b\"", ApplyTargetName("!tp ^", "a;b"));
+
+        var pkt = new List<byte>();
+        pkt.AddRange(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x44, 4 });
+        Action<byte, string, int, float> addPl = delegate(byte pIdx, string nm, int sc, float dur)
+        {
+            pkt.Add(pIdx);
+            pkt.AddRange(Encoding.UTF8.GetBytes(nm));
+            pkt.Add(0);
+            pkt.AddRange(BitConverter.GetBytes(sc));
+            pkt.AddRange(BitConverter.GetBytes(dur));
+        };
+        addPl(0, "顾彼惜朝", 3, 125.9f);
+        addPl(1, "若葉 睦", 0, 12.1f);
+        addPl(2, "   ", 0, 5.0f);
+        addPl(3, "♯###503", -1, 3600.0f);
+        var parsedPls = ParseA2SPlayersPayload(pkt.ToArray());
+        var truncPls = ParseA2SPlayersPayload(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x44, 1, 0, 65, 66 });
+        chk("A2S_PLAYER 协议包解析：正常解码中/日/符号昵称、过滤空槽与截断兜底",
+            parsedPls.Count == 3
+            && parsedPls[0].Name == "顾彼惜朝" && parsedPls[0].DurationSec == 125 && parsedPls[0].Score == 3
+            && parsedPls[1].Name == "若葉 睦" && parsedPls[1].DurationSec == 12
+            && parsedPls[2].Name == "♯###503" && parsedPls[2].DurationSec == 3600
+            && truncPls.Count == 0, "");
+
+        var fpSrc = new List<A2SPlayerInfo>();
+        fpSrc.Add(new A2SPlayerInfo { Name = "Bot15", DurationSec = 500, IsBot = true });
+        fpSrc.Add(new A2SPlayerInfo { Name = "顾彼惜朝（omo）", DurationSec = 180, IsBot = false, NamePinyin = PinyinHelper.BuildTitle("顾彼惜朝（omo）") });
+        fpSrc.Add(new A2SPlayerInfo { Name = "若葉 睦", DurationSec = 20, IsBot = false, NamePinyin = PinyinHelper.BuildTitle("若葉 睦") });
+        fpSrc.Add(new A2SPlayerInfo { Name = "♯###503", DurationSec = 600, IsBot = false, NamePinyin = PinyinHelper.BuildTitle("♯###503") });
+        var fpAllNoBot = OnlinePlayerPickerForm.FilterAndSort(fpSrc, "", true, 0);
+        var fpWithBot = OnlinePlayerPickerForm.FilterAndSort(fpSrc, "", false, 1);
+        var fpPy = OnlinePlayerPickerForm.FilterAndSort(fpSrc, "gbxc", true, 0);
+        var fpSym = OnlinePlayerPickerForm.FilterAndSort(fpSrc, "###", true, 2);
+        chk("在线玩家筛选排序：空搜留全量、隐藏 Bot、拼音/符号命中与三种排序模式",
+            fpAllNoBot.Count == 3 && fpAllNoBot[0].Name == "若葉 睦" && fpAllNoBot[2].Name == "♯###503"
+            && fpWithBot.Count == 4 && fpWithBot[0].Name == "♯###503"
+            && fpPy.Count == 1 && fpPy[0].Name == "顾彼惜朝（omo）"
+            && fpSym.Count == 1 && fpSym[0].Name == "♯###503"
+            && A2SPlayerInfo.DetectBotName("Bot15") && !A2SPlayerInfo.DetectBotName("Bottom"), "");
 
         // ---- 5.5 条目编辑器（PromptItem 走 DevSplitItem/DevJoinItem）----
                 string editRaw = "带注解条目" + "\u0001" + "!cmd ^" + "\u0002" + "\u0003" + "这是注解";
@@ -228,19 +268,122 @@ public partial class MainForm
             string dest = Path.Combine(tmpDir, "got.bin");
             string fileUrl = new Uri(src).AbsoluteUri;
 
-            chk("更新下载 + SHA256 校验通过", DownloadAndVerify(fileUrl, goodSha, dest) && File.Exists(dest), "");
-            chk("更新下载：哈希不对时拒绝", !DownloadAndVerify(fileUrl, new string('0', 64), Path.Combine(tmpDir, "bad.bin")), "");
-            chk("更新下载：空哈希时拒绝", !DownloadAndVerify(fileUrl, "", Path.Combine(tmpDir, "emptysha.bin")), "");
+            chk("更新下载 + SHA256 校验通过", DownloadAndVerify(fileUrl, goodSha, dest, null, true) && File.Exists(dest), "");
+            chk("更新下载：哈希不对时拒绝", !DownloadAndVerify(fileUrl, new string('0', 64), Path.Combine(tmpDir, "bad.bin"), null, true), "");
+            chk("更新下载：空哈希时拒绝", !DownloadAndVerify(fileUrl, "", Path.Combine(tmpDir, "emptysha.bin"), null, true), "");
             chk("更新下载：拒绝非本机 http://，允许 https:// 与本机回环端口",
-                !IsHttpsUrl("http://rx-toolbox.pages.dev/a.exe")
-                && IsHttpsUrl("https://rx-toolbox.pages.dev/a.exe")
+                !IsHttpsUrl("http://rx-tools.pages.dev/a.exe")
+                && IsHttpsUrl("https://rx-tools.pages.dev/a.exe")
                 && !IsAllowedUpdateUrl("http://example.com/a.exe")
                 && !IsAllowedUpdateUrl("http://192.168.1.10/a.exe")
                 && IsAllowedUpdateUrl("http://127.0.0.1:18080/version.json")
                 && IsAllowedUpdateUrl("http://localhost:18080/a.exe")
                 && !DownloadAndVerify("http://example.com/a.exe", goodSha, Path.Combine(tmpDir, "http.bin")), "");
+            chk("更新下载：生产默认拒绝 file:// 与 UNC 路径",
+                !DownloadAndVerify(fileUrl, goodSha, Path.Combine(tmpDir, "blocked_file.bin"))
+                && !DownloadAndVerify("file://attacker/share/evil.exe", goodSha, Path.Combine(tmpDir, "blocked_unc.bin"), null, true), "");
+            chk("更新跳转校验：禁止 HTTPS 降级为 HTTP 或回环地址",
+                IsAllowedRedirectTarget("https://rx-tools.pages.dev/a", "https://cdn.example.com/b")
+                && !IsAllowedRedirectTarget("https://rx-tools.pages.dev/a", "http://cdn.example.com/b")
+                && !IsAllowedRedirectTarget("https://rx-tools.pages.dev/a", "http://127.0.0.1:8080/b")
+                && IsAllowedRedirectTarget("http://127.0.0.1:18080/a", "http://127.0.0.1:18080/b"), "");
+            using (var testBmp = new Bitmap(32, 16, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(testBmp)) g.Clear(Color.Black);
+                using (var sb1 = CreateSoftwareBitmapFromBitmap(testBmp, 1))
+                using (var sb2 = CreateSoftwareBitmapFromBitmap(testBmp, 2))
+                {
+                    chk("OCR 零 PNG 位图直传：scale=1 与 scale=2 正常生成 SoftwareBitmap",
+                        sb1 != null && sb1.PixelWidth == 32 && sb1.PixelHeight == 16
+                        && sb2 != null && sb2.PixelWidth == 64 && sb2.PixelHeight == 32, "");
+                }
+            }
+            Native.LogWarn(null, null);
+            Native.LogWarn("selftest", new InvalidOperationException("rate-limit-check"));
+            Native.LogWarn("selftest", new InvalidOperationException("rate-limit-check"));
+            chk("Native.LogWarn 空参数与限流调用不抛异常", true, "");
+
+            string savedLogPath = Native.LogPath;
+            try
+            {
+                string testLog = Path.Combine(tmpDir, "rx_test.log");
+                Native.LogPath = testLog;
+                long emptySz = Native.GetLogSizeBytes();
+                File.WriteAllBytes(testLog, new byte[12]);
+                File.WriteAllBytes(testLog + ".old", new byte[8]);
+                long twoSz = Native.GetLogSizeBytes();
+                bool cleared = Native.ClearLog();
+                long afterSz = Native.GetLogSizeBytes();
+                chk("Native.GetLogSizeBytes / ClearLog 统计与清空主备日志准确",
+                    emptySz == 0 && twoSz == 20 && cleared && afterSz == 0
+                    && !File.Exists(testLog) && !File.Exists(testLog + ".old"), "");
+            }
+            finally { Native.LogPath = savedLogPath; }
+
+            chk("准星中心偏移钳制 Overlay.ClampOffset 边界正确",
+                Overlay.ClampOffset(-999) == Overlay.OffsetMin
+                && Overlay.ClampOffset(999) == Overlay.OffsetMax
+                && Overlay.ClampOffset(3) == 3, "");
+
+            var cpList = new List<CrosshairPreset>();
+            var cpA = new CrosshairPreset
+            {
+                Name = "狙击红点,微偏", StyleIndex = 2, ColorIndex = 4, Thickness = 3, Length = 12, Gap = 4,
+                DotSize = 3, OutlineWidth = 2, OpacityPct = 85, OffsetX = -2, OffsetY = 3, CustomImagePath = ""
+            };
+            var cpB = new CrosshairPreset
+            {
+                Name = "自定义;PNG", StyleIndex = 0, ColorIndex = 0, Thickness = 2, Length = 10, Gap = 5,
+                DotSize = 1, OutlineWidth = 1, OpacityPct = 90, OffsetX = 1, OffsetY = -1,
+                CustomImagePath = @"C:\dir\cross,semi;test.png"
+            };
+            cpList.Add(cpA);
+            cpList.Add(cpB);
+            string cpSer = CrosshairPreset.SerializePresets(cpList);
+            var cpBack = CrosshairPreset.DeserializePresets(cpSer);
+            chk("准星方案 CrosshairPreset 序列化往返无损（含特殊标点与偏移）",
+                cpBack.Count == 2
+                && cpBack[0].Name == "狙击红点,微偏" && cpBack[0].OffsetX == -2 && cpBack[0].OffsetY == 3 && cpBack[0].OpacityPct == 85
+                && cpBack[1].Name == "自定义;PNG" && cpBack[1].CustomImagePath == @"C:\dir\cross,semi;test.png", "");
+
+            var cpDefaults = CrosshairPreset.DeserializePresets("broken-data");
+            using (var ovTest = new Overlay())
+            {
+                cpDefaults[1].ApplyScalarToOverlay(ovTest);
+                bool matchBefore = cpDefaults[1].MatchesOverlay(ovTest);
+                ovTest.OffsetX = 2;
+                bool matchAfter = cpDefaults[1].MatchesOverlay(ovTest);
+                chk("准星默认方案 4 套加载与 MatchesOverlay 匹配/改动检测",
+                    cpDefaults.Count == 4 && matchBefore && !matchAfter, "");
+            }
+
+            using (var strip = new CrosshairPresetStrip())
+            {
+                strip.Size = new Size(498, 74);
+                strip.Presets = cpDefaults;
+                var rc0 = strip.GetCardRect(0);
+                var rc3 = strip.GetCardRect(3);
+                chk("CrosshairPresetStrip 卡片命中测试与单实例唤醒消息常量检查",
+                    strip.HitTest(new Point(rc0.X + 4, rc0.Y + 4)) == 0
+                    && strip.HitTest(new Point(rc3.X + 4, rc3.Y + 4)) == 3
+                    && Native.WM_RX_WAKE == 0x8001, "");
+            }
 #if ADMIN_EDITION
             chk("MiniJson：损坏输入不死循环", MiniJson.Parse("{bad:123,@}") != null, "");
+            chk("MiniJson：字面量精确校验（拒绝畸形 txyz/fxyz/nxyz）",
+                !true.Equals(MiniJson.Parse("txyz"))
+                && !false.Equals(MiniJson.Parse("fxyz"))
+                && MiniJson.Parse("nxyz") != null
+                && true.Equals(MiniJson.Parse("true"))
+                && false.Equals(MiniJson.Parse("false"))
+                && MiniJson.Parse("null") == null, "");
+            string encHub = ProtectHubKey("test-hub-secret-191");
+            chk("HubKey DPAPI 加密落盘与解密往返一致",
+                encHub.StartsWith("dpapi:", StringComparison.Ordinal) && UnprotectHubKey(encHub) == "test-hub-secret-191", "");
+            byte[] redactedBoth = RedactHubKeyFromSettings(Encoding.UTF8.GetBytes("ThemeMode=1\r\nHubKey=plain\r\nHubKeyEnc=" + encHub + "\r\n"));
+            string redactedTxt = Encoding.UTF8.GetString(redactedBoth);
+            chk("备份脱敏：同时剔除明文 HubKey 与密文 HubKeyEnc",
+                redactedTxt.IndexOf("HubKey", StringComparison.Ordinal) < 0 && redactedTxt.IndexOf("ThemeMode=1", StringComparison.Ordinal) >= 0, "");
             chk("MiniJson：超深嵌套安全拦截不栈溢出",
                 Data.ParseTables(new string('[', 120) + new string(']', 120)) == null, "");
             chk("版本库错误提示：识别 401 unauthorized",
@@ -414,11 +557,19 @@ public partial class MainForm
             string strippedWarn = StripWarnChangelogLine("!!【重要提醒】测试", out sawWarnLine);
 #if ADMIN_EDITION
             chk("管理版窗口标题后缀标识", APP_EDITION_SUFFIX == "（管理版）", APP_EDITION_SUFFIX);
+            bool has180Warn = false;
+            for (int ci = 0; ci < CHANGELOG.Length; ci++)
+            {
+                if (CHANGELOG[ci].StartsWith("1.8.0|", StringComparison.Ordinal) && CHANGELOG[ci].Contains("Rx工具箱.exe"))
+                {
+                    has180Warn = true;
+                    break;
+                }
+            }
             chk("更新日志首条与当前版本一致且高亮标记格式正确",
                 CHANGELOG.Length > 4
                 && CHANGELOG[0].StartsWith(APP_VERSION_NUM + "|", StringComparison.Ordinal)
-                && CHANGELOG[4].StartsWith("1.8.0|", StringComparison.Ordinal)
-                && CHANGELOG[4].Contains("Rx工具箱.exe")
+                && has180Warn
                 && sawWarnLine && strippedWarn.StartsWith("【重要提醒】", StringComparison.Ordinal), "");
 #else
             chk("公开版更新日志、无管理后缀与独立更新源配置检查",
@@ -522,6 +673,12 @@ public partial class MainForm
                 bool collapsedAll = wl.AreAllCollapsed();
                 chk("分类折叠：默认全收起、单次运行保留手动状态与一键全部展开/收起",
                     startAllFolded && keepUserAdj && expandedAll && collapsedAll, "");
+
+                chk("纯说明条目与可折叠分类头视觉判定区分（IsInfoBanner vs IsCollapsible）",
+                    wl.IsInfoBanner(0) && !wl.IsCollapsible(0)
+                    && !wl.IsInfoBanner(1) && wl.IsCollapsible(1)
+                    && !wl.IsInfoBanner(2)
+                    && !wl.IsInfoBanner(6) && wl.IsCollapsible(6), "");
             }
 
             using (var wlPerf = new WrapList())
@@ -711,24 +868,30 @@ public partial class MainForm
                     outBmp == null ? "null" : ("corner=" + outBmp.GetPixel(0, 0).A + " center=" + outBmp.GetPixel(8, 8).A));
             }
 
-            Color bgItem, fgItem, bgRole, fgRole, bgScp, fgScp, bgCust, fgCust;
-            ThemePalette.GetSourceBadgeColors("物品表", out bgItem, out fgItem);
-            ThemePalette.GetSourceBadgeColors("角色表", out bgRole, out fgRole);
-            ThemePalette.GetSourceBadgeColors("SCP角色", out bgScp, out fgScp);
-            ThemePalette.GetSourceBadgeColors("自定义", out bgCust, out fgCust);
             using (var ovDef = new Overlay())
             using (var cdDef = new CountdownOverlay())
             {
                 chk("HUD 默认外观与语义色板检查",
                     ovDef.OutlineWidth == 1 && ovDef.OpacityPct == 100
                     && !cdDef.UseCardStyle
-                    && !bgItem.IsEmpty && !fgItem.IsEmpty && !bgRole.IsEmpty && !fgRole.IsEmpty
-                    && !bgScp.IsEmpty && !fgScp.IsEmpty && !bgCust.IsEmpty && !fgCust.IsEmpty
-                    && fgItem.ToArgb() != fgRole.ToArgb() && fgRole.ToArgb() != fgScp.ToArgb()
-                    && fgScp.ToArgb() != fgCust.ToArgb(), "");
+                    && !ThemePalette.Accent.IsEmpty
+                    && !ThemePalette.Success.IsEmpty
+                    && !ThemePalette.Danger.IsEmpty
+                    && ThemePalette.Success.ToArgb() != ThemePalette.Danger.ToArgb(), "");
             }
 
 #if ADMIN_EDITION
+            Color bgItem, fgItem, bgRole, fgRole, bgScp, fgScp, bgCust, fgCust;
+            ThemePalette.GetSourceBadgeColors("物品表", out bgItem, out fgItem);
+            ThemePalette.GetSourceBadgeColors("角色表", out bgRole, out fgRole);
+            ThemePalette.GetSourceBadgeColors("SCP角色", out bgScp, out fgScp);
+            ThemePalette.GetSourceBadgeColors("自定义", out bgCust, out fgCust);
+            chk("管理版来源徽标语义色板区分",
+                !bgItem.IsEmpty && !fgItem.IsEmpty && !bgRole.IsEmpty && !fgRole.IsEmpty
+                && !bgScp.IsEmpty && !fgScp.IsEmpty && !bgCust.IsEmpty && !fgCust.IsEmpty
+                && fgItem.ToArgb() != fgRole.ToArgb() && fgRole.ToArgb() != fgScp.ToArgb()
+                && fgScp.ToArgb() != fgCust.ToArgb(), "");
+
             // ---- V1.9.0 管理版工作台、拼音与命令面板自检 ----
             chk("拼音首字母引擎 PinyinHelper.GetInitials",
                 PinyinHelper.GetInitials("血肉枪") == "xrq"
@@ -876,6 +1039,42 @@ public partial class MainForm
             chk("智能拼音：英文标题优先于拼音模糊匹配且混拼命中精确条目",
                 rankAk.Count >= 1 && rankAk[0].Title == "AK47"
                 && rankJiqr.Count == 1 && rankJiqr[0].Title == "机器人", "");
+
+            bool themeMapOk = (ModeToSettingsThemeIndex(0) == 0 && ModeToSettingsThemeIndex(2) == 1 && ModeToSettingsThemeIndex(1) == 2
+                && SettingsThemeIndexToMode(0) == 0 && SettingsThemeIndexToMode(1) == 2 && SettingsThemeIndexToMode(2) == 1);
+            for (int tm = 0; tm <= 2; tm++)
+            {
+                if (SettingsThemeIndexToMode(ModeToSettingsThemeIndex(tm)) != tm) themeMapOk = false;
+            }
+            int segEvtCount = 0;
+            using (var segT = new RxSegmentedControl())
+            {
+                segT.Items = new string[] { "跟随系统", "护眼浅色", "夜间深色" };
+                segT.SelectedIndexChanged += delegate { segEvtCount++; };
+                segT.SetSelectedSilent(2);
+                segT.SetSelectedSilent(1);
+                if (segT.SelectedIndex != 1 || segEvtCount != 0) themeMapOk = false;
+            }
+            chk("设置页主题分段索引与 themeMode 双向映射且静默同步不触发事件", themeMapOk, "");
+
+            string iq1, iq2, iq3, iq4, iq5;
+            bool p1 = CommandPaletteForm.TryParseInlinePlayerQuery("@", out iq1);
+            bool p2 = CommandPaletteForm.TryParseInlinePlayerQuery("@张三", out iq2);
+            bool p3 = CommandPaletteForm.TryParseInlinePlayerQuery("@  xm", out iq3);
+            bool p4 = CommandPaletteForm.TryParseInlinePlayerQuery("xrq", out iq4);
+            bool p5 = CommandPaletteForm.TryParseInlinePlayerQuery("", out iq5);
+            string sl1 = CommandPaletteForm.ShortServerLabel("1服 · RXBreach (18/64)");
+            string sl2 = CommandPaletteForm.ShortServerLabel("");
+            string sl3 = CommandPaletteForm.ShortServerLabel("123456789012345678901234567890 (1/64)");
+            chk("命令面板 @ 选人前缀解析与服务器胶囊短标题格式化",
+                p1 && iq1 == ""
+                && p2 && iq2 == "张三"
+                && p3 && iq3 == "xm"
+                && !p4 && iq4 == ""
+                && !p5 && iq5 == ""
+                && sl1 == "1服 · RXBreach"
+                && sl2 == "选择服务器"
+                && sl3 == "1234567890123456789…", "");
 #endif
 
             try { Directory.Delete(tmpDir, true); } catch { }

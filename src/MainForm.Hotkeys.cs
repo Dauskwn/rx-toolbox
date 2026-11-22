@@ -28,6 +28,7 @@ public partial class MainForm
                 if (cmbStyle != null) cmbStyle.SelectedIndex = overlay.StyleIndex;
                 suppressSettingsSave = false;
                 if (crossPreview != null) crossPreview.Invalidate();
+                SyncCrossPresetUiState();
                 SaveSettings();
                 toast.ShowText("准星样式：" + Overlay.Styles[overlay.StyleIndex]);
                 RefreshUi(true);
@@ -41,6 +42,7 @@ public partial class MainForm
                 if (cmbColor != null) cmbColor.SelectedIndex = overlay.ColorIndex;
                 suppressSettingsSave = false;
                 if (crossPreview != null) crossPreview.Invalidate();
+                SyncCrossPresetUiState();
                 SaveSettings();
                 toast.ShowText("准星颜色：" + Overlay.ColorNames[overlay.ColorIndex]);
                 RefreshUi(true);
@@ -50,7 +52,7 @@ public partial class MainForm
                 break;
             case 5:
                 Native.Log("quit via hotkey");
-                Close();
+                ExitAppReal();
                 break;
             case 6:
                 StartOrResetCountdown();
@@ -170,6 +172,9 @@ public partial class MainForm
 
     void UpdateHotkeyToggleButton()
     {
+#if ADMIN_EDITION
+        SyncSettingsPageUi();
+#endif
         if (btnHotkeyOff == null) return;
         btnHotkeyOff.Text = hotkeysOff ? ("开启热键 (" + ToggleKeyName() + ")") : ("关闭热键 (" + ToggleKeyName() + ")");
         if (IsDark)
@@ -272,16 +277,14 @@ public partial class MainForm
             }
             if (lblCrossHint != null)
             {
-                lblCrossHint.Text = "快捷键：\r\n"
-                    + "· " + KeyName(1) + " ：循环切换准星样式（6 种）\r\n"
-                    + "· " + KeyName(3) + " ：循环切换准星颜色（6 色）\r\n"
-                    + "· " + KeyName(4) + " ：显示 / 隐藏屏幕准星\r\n"
-                    + "· " + KeyName(5) + " ：安全退出工具箱\r\n\r\n"
-                    + "提示：准星为透明置顶叠加层，建议将游戏显示模式设为“无边框窗口化”以获得最佳体验。";
+                lblCrossHint.Text = "快捷键："
+                    + KeyName(1) + " 切样式 · " + KeyName(3) + " 换颜色 · " + KeyName(4) + " 开关准星 · " + KeyName(5) + " 退出工具箱\r\n"
+                    + "提示：准星为 32-bit 透明置顶叠加层，建议将游戏设为“无边框窗口化”；预览框左键换色、右键切底色。";
             }
             UpdateJoinHint();
 #if ADMIN_EDITION
             UpdateGlobalSearchShortcut();
+            SyncSettingsPageUi();
 #endif
         }
         catch { }

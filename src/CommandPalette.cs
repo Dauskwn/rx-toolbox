@@ -5,6 +5,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 public sealed class PinyinTitle
@@ -434,6 +436,40 @@ public class PaletteEntry
     public int RecentOrder;     // 0=最近第1条, -1=非最近
 }
 
+public class PalettePlayerContext
+{
+    public List<OnlineServerEntry> Servers;
+    public string InitialServerAddr = "";
+    public string MySteamName = "";
+    public bool HideBots = true;
+    public int SortMode = 0;
+    public Dictionary<string, OnlinePlayerCache> Cache;
+    public Action<string> OnTargetChanged;
+    public Action<string, bool> OnCopyPlayerName;
+    public Action<string> OnServerChanged;
+}
+
+internal sealed class PalettePlayerRow
+{
+    public bool IsResetRow;
+    public A2SPlayerInfo Player;
+}
+
+internal sealed class PaletteMenuColorTable : ProfessionalColorTable
+{
+    public override Color MenuBorder { get { return ThemePalette.BorderSubtle; } }
+    public override Color MenuItemBorder { get { return ThemePalette.Accent; } }
+    public override Color MenuItemSelected { get { return ThemePalette.Hover; } }
+    public override Color MenuStripGradientBegin { get { return ThemePalette.SurfaceAlt; } }
+    public override Color MenuStripGradientEnd { get { return ThemePalette.SurfaceAlt; } }
+    public override Color ToolStripDropDownBackground { get { return ThemePalette.SurfaceAlt; } }
+    public override Color ImageMarginGradientBegin { get { return ThemePalette.SurfaceAlt; } }
+    public override Color ImageMarginGradientMiddle { get { return ThemePalette.SurfaceAlt; } }
+    public override Color ImageMarginGradientEnd { get { return ThemePalette.SurfaceAlt; } }
+    public override Color SeparatorDark { get { return ThemePalette.BorderSubtle; } }
+    public override Color SeparatorLight { get { return ThemePalette.BorderSubtle; } }
+}
+
 /// <summary>
 /// 全局命令面板（Alt+K / 全局热键唤起）：支持居中/左侧/右侧三档覆盖层与跨全库智能拼音瞬搜。
 /// </summary>
@@ -482,6 +518,26 @@ public class CommandPaletteForm : Form
         return "居中";
     }
 
+    public static bool TryParseInlinePlayerQuery(string text, out string playerQuery)
+    {
+        playerQuery = "";
+        if (string.IsNullOrEmpty(text)) return false;
+        if (text[0] != '@') return false;
+        playerQuery = text.Substring(1).TrimStart();
+        return true;
+    }
+
+    public static string ShortServerLabel(string label)
+    {
+        string s = (label ?? "").Trim();
+        if (s.Length == 0) return "选择服务器";
+        int lp = s.LastIndexOf(" (", StringComparison.Ordinal);
+        if (lp > 0 && s[s.Length - 1] == ')')
+            s = s.Substring(0, lp).TrimEnd();
+        if (s.Length > 20) s = s.Substring(0, 19) + "…";
+        return s;
+    }
+
     public static Rectangle ComputeDockBounds(Rectangle scr, int mode)
     {
         int m = NormalizeDockMode(mode);
@@ -508,7 +564,8 @@ public class CommandPaletteForm : Form
     readonly Action<int> onOpacityChanged;
     readonly Action<int> onDockChanged;
     readonly bool openedFromGlobal;
-    readonly string currentTarget;
+    readonly PalettePlayerContext playerCtx;
+    string currentTarget;
 
     TextBox txtQuery;
     RxSegmentedControl segMode;
@@ -526,6 +583,24 @@ public class CommandPaletteForm : Form
     bool useDwmRound = false;
     bool opacityPillHover = false;
     bool dockPillHover = false;
+    bool targetPillHover = false;
+    bool serverPillHover = false;
+    bool refreshPillHover = false;
+
+    bool playerMode = false;
+    bool playerModeByAt = false;
+    bool suppressQueryEvent = false;
+    bool suppressDeactivateClose = false;
+    bool menuTriggeredPaletteClose = false;
+    string savedCmdQuery = "";
+    string curPlayerQuery = "";
+    string currentServerAddr = "";
+    int playerQuerySeq = 0;
+    bool playerLoading = false;
+    string playerStatusNote = "";
+    List<A2SPlayerInfo> currentRawPlayers = new List<A2SPlayerInfo>();
+    List<PalettePlayerRow> playerRows = new List<PalettePlayerRow>();
+    ContextMenuStrip activePopupMenu;
 
     int shownTick = 0;
     bool bounceRecovered = false;
@@ -540,7 +615,9 @@ public class CommandPaletteForm : Form
     Font fQuery, fTitle, fCode, fBadge, fFooter;
 
     bool IsSideMode { get { return dockMode != DockCenter; } }
-    int CurrentRowH { get { return IsSideMode ? 60 : 44; } }
+    bool CanPickPlayer { get { return playerCtx != null && playerCtx.Servers != null && playerCtx.Servers.Count > 0; } }
+    int CurrentRowH { get { return playerMode ? 38 : (IsSideMode ? 60 : 44); } }
+    int CurrentItemCount { get { return playerMode ? playerRows.Count : matches.Count; } }
 
     Rectangle DockPillRect
     {
@@ -562,13 +639,45 @@ public class CommandPaletteForm : Form
         }
     }
 
+    Rectangle TargetPillRect
+    {
+        get
+        {
+            if (!IsSideMode)
+                return new Rectangle(Width - 170, Height - 26, 158, 20);
+            if (playerMode)
+                return new Rectangle(196, 50, Math.Max(70, Width - 264), 22);
+            return new Rectangle(136, 50, Math.Max(80, Width - 204), 22);
+        }
+    }
+
+    Rectangle ServerPillRect
+    {
+        get
+        {
+            if (!playerMode) return Rectangle.Empty;
+            if (!IsSideMode) return new Rectangle(Width - 230, 15, 142, 24);
+            return new Rectangle(12, 50, 150, 22);
+        }
+    }
+
+    Rectangle RefreshPillRect
+    {
+        get
+        {
+            if (!playerMode) return Rectangle.Empty;
+            if (!IsSideMode) return new Rectangle(Width - 84, 15, 24, 24);
+            return new Rectangle(166, 50, 24, 22);
+        }
+    }
+
     public CommandPaletteForm(
         List<PaletteEntry> entries,
         string targetName,
         Func<PaletteEntry, bool, string> resolver,
         Action<PaletteEntry, bool> executeCb,
         Func<string, bool> togglePinCb)
-        : this(entries, targetName, resolver, executeCb, togglePinCb, DefaultOpacityPct, null, DockCenter, null, false)
+        : this(entries, targetName, resolver, executeCb, togglePinCb, DefaultOpacityPct, null, DockCenter, null, false, null)
     {
     }
 
@@ -580,7 +689,7 @@ public class CommandPaletteForm : Form
         Func<string, bool> togglePinCb,
         int initialOpacityPct,
         Action<int> opacityChangedCb)
-        : this(entries, targetName, resolver, executeCb, togglePinCb, initialOpacityPct, opacityChangedCb, DockCenter, null, false)
+        : this(entries, targetName, resolver, executeCb, togglePinCb, initialOpacityPct, opacityChangedCb, DockCenter, null, false, null)
     {
     }
 
@@ -595,6 +704,22 @@ public class CommandPaletteForm : Form
         int initialDockMode,
         Action<int> dockChangedCb,
         bool fromGlobalHotkey)
+        : this(entries, targetName, resolver, executeCb, togglePinCb, initialOpacityPct, opacityChangedCb, initialDockMode, dockChangedCb, fromGlobalHotkey, null)
+    {
+    }
+
+    public CommandPaletteForm(
+        List<PaletteEntry> entries,
+        string targetName,
+        Func<PaletteEntry, bool, string> resolver,
+        Action<PaletteEntry, bool> executeCb,
+        Func<string, bool> togglePinCb,
+        int initialOpacityPct,
+        Action<int> opacityChangedCb,
+        int initialDockMode,
+        Action<int> dockChangedCb,
+        bool fromGlobalHotkey,
+        PalettePlayerContext playerContext)
     {
         allEntries = entries ?? new List<PaletteEntry>();
         currentTarget = targetName ?? "";
@@ -604,6 +729,15 @@ public class CommandPaletteForm : Form
         onOpacityChanged = opacityChangedCb;
         onDockChanged = dockChangedCb;
         openedFromGlobal = fromGlobalHotkey;
+        playerCtx = playerContext;
+        if (playerCtx != null)
+        {
+            if (playerCtx.Cache == null)
+                playerCtx.Cache = new Dictionary<string, OnlinePlayerCache>(StringComparer.OrdinalIgnoreCase);
+            currentServerAddr = playerCtx.InitialServerAddr ?? "";
+            if (string.IsNullOrEmpty(currentServerAddr) && playerCtx.Servers != null && playerCtx.Servers.Count > 0)
+                currentServerAddr = playerCtx.Servers[0].Addr;
+        }
         opacityPct = ClampOpacityPct(initialOpacityPct);
         dockMode = NormalizeDockMode(initialDockMode);
 
@@ -629,7 +763,7 @@ public class CommandPaletteForm : Form
         txtQuery.BackColor = ThemePalette.Elevated;
         txtQuery.ForeColor = ThemePalette.TextPrimary;
         txtQuery.HandleCreated += delegate { UpdateCueBanner(); };
-        txtQuery.TextChanged += delegate { RunSearch(txtQuery.Text); };
+        txtQuery.TextChanged += delegate { OnQueryTextChanged(); };
         txtQuery.MouseWheel += delegate(object snd, MouseEventArgs me)
         {
             if ((Control.ModifierKeys & Keys.Control) != 0)
@@ -670,10 +804,47 @@ public class CommandPaletteForm : Form
     void UpdateCueBanner()
     {
         if (txtQuery == null || !txtQuery.IsHandleCreated) return;
-        string cue = IsSideMode
-            ? "搜索指令/物品/角色（xrq / jiqiren / jiqr）…"
-            : "搜索全库指令与自定义（拼音如 xrq / jiqiren / jiqr）…";
+        string cue;
+        if (playerMode)
+        {
+            cue = "输入玩家名或拼音 | 留空看全部";
+        }
+        else
+        {
+            cue = CanPickPlayer
+                ? "搜索指令 | 支持拼音搜索 | @选玩家ID"
+                : "搜索指令 | 支持拼音搜索";
+        }
         try { Native.SetCueBanner(txtQuery.Handle, cue); } catch { }
+    }
+
+    void ApplyModeTopControls()
+    {
+        if (segMode != null) segMode.Visible = !playerMode;
+        if (IsSideMode)
+        {
+            txtQuery.SetBounds(40, 14, Width - 54, 24);
+            if (!playerMode) segMode.SetBounds(12, 48, 116, 26);
+            lblCount.SetBounds(Width - 62, 50, 50, 22);
+            listPanel.SetBounds(6, 86, Width - 12, Height - 126);
+        }
+        else
+        {
+            txtQuery.SetBounds(42, 16, playerMode ? (Width - 282) : (Width - 232), 26);
+            if (!playerMode) segMode.SetBounds(Width - 180, 13, 120, 28);
+            lblCount.SetBounds(Width - 58, 16, 48, 22);
+            listPanel.SetBounds(6, 56, Width - 12, Height - 92);
+        }
+    }
+
+    void ApplyModeChrome()
+    {
+        ApplyModeTopControls();
+        UpdateCueBanner();
+        UpdateCountLabel();
+        EnsureSelVisible();
+        Invalidate();
+        if (listPanel != null) listPanel.Invalidate();
     }
 
     void StopSlideTimer()
@@ -697,20 +868,7 @@ public class CommandPaletteForm : Form
         if (!useDwmRound && IsHandleCreated)
             Native.ApplyRoundRegion(this, 12);
 
-        if (IsSideMode)
-        {
-            txtQuery.SetBounds(40, 14, Width - 54, 24);
-            segMode.SetBounds(12, 48, 116, 26);
-            lblCount.SetBounds(Width - 62, 50, 50, 22);
-            listPanel.SetBounds(6, 86, Width - 12, Height - 126);
-        }
-        else
-        {
-            txtQuery.SetBounds(42, 16, Width - 232, 26);
-            segMode.SetBounds(Width - 180, 13, 120, 28);
-            lblCount.SetBounds(Width - 58, 16, 48, 22);
-            listPanel.SetBounds(6, 56, Width - 12, Height - 92);
-        }
+        ApplyModeTopControls();
         UpdateCueBanner();
 
         if (animateSlide && IsSideMode && IsHandleCreated)
@@ -805,6 +963,7 @@ public class CommandPaletteForm : Form
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
+        if (suppressDeactivateClose) return;
         if (openedFromGlobal && !bounceRecovered && unchecked(Environment.TickCount - shownTick) < 160)
         {
             bounceRecovered = true;
@@ -903,6 +1062,61 @@ public class CommandPaletteForm : Form
         return result;
     }
 
+    void OnQueryTextChanged()
+    {
+        if (suppressQueryEvent || txtQuery == null) return;
+        string txt = txtQuery.Text ?? "";
+        string pq;
+        if (!playerMode)
+        {
+            if (CanPickPlayer && TryParseInlinePlayerQuery(txt, out pq))
+            {
+                EnterPlayerMode(true, pq);
+                return;
+            }
+            RunSearch(txt);
+            return;
+        }
+
+        if (playerModeByAt)
+        {
+            if (!TryParseInlinePlayerQuery(txt, out pq))
+            {
+                ExitPlayerMode(false, txt);
+                return;
+            }
+            RebuildPlayerRows(pq);
+        }
+        else
+        {
+            RebuildPlayerRows(txt);
+        }
+    }
+
+    void UpdateCountLabel()
+    {
+        if (lblCount == null) return;
+        if (!playerMode)
+        {
+            lblCount.Text = matches.Count + " 项";
+            return;
+        }
+        if (playerLoading)
+        {
+            lblCount.Text = "查询中…";
+            return;
+        }
+        if (!string.IsNullOrEmpty(playerStatusNote) && currentRawPlayers.Count == 0)
+        {
+            lblCount.Text = "异常";
+            return;
+        }
+        int cnt = 0;
+        for (int i = 0; i < playerRows.Count; i++)
+            if (!playerRows[i].IsResetRow) cnt++;
+        lblCount.Text = cnt + " 人";
+    }
+
     void RunSearch(string query)
     {
         string q = (query ?? "").Trim();
@@ -910,8 +1124,435 @@ public class CommandPaletteForm : Form
         matches = ScoreAndFilter(allEntries, q, 120);
         selIdx = matches.Count > 0 ? 0 : -1;
         scrollIdx = 0;
-        lblCount.Text = matches.Count + " 项";
-        listPanel.Invalidate();
+        hoverIdx = -1;
+        UpdateCountLabel();
+        if (listPanel != null) listPanel.Invalidate();
+    }
+
+    void EnterPlayerMode(bool byAt, string initialFilter)
+    {
+        if (!CanPickPlayer) return;
+        if (!byAt)
+        {
+            savedCmdQuery = (txtQuery != null) ? (txtQuery.Text ?? "") : "";
+            if (txtQuery != null && txtQuery.TextLength > 0)
+            {
+                suppressQueryEvent = true;
+                txtQuery.Text = "";
+                suppressQueryEvent = false;
+            }
+        }
+        else
+        {
+            savedCmdQuery = "";
+        }
+
+        playerMode = true;
+        playerModeByAt = byAt;
+        hoverIdx = -1;
+        scrollIdx = 0;
+        ApplyModeChrome();
+        LoadPlayerCacheOrFetch(false, initialFilter ?? "");
+        if (txtQuery != null && !txtQuery.IsDisposed) txtQuery.Focus();
+    }
+
+    void ExitPlayerMode(bool restoreSavedQuery, string overrideQuery)
+    {
+        if (!playerMode) return;
+        playerQuerySeq++;
+        playerLoading = false;
+        playerStatusNote = "";
+        playerMode = false;
+        bool wasAt = playerModeByAt;
+        playerModeByAt = false;
+        hoverIdx = -1;
+        serverPillHover = false;
+        refreshPillHover = false;
+
+        string nextQ;
+        if (overrideQuery != null) nextQ = overrideQuery;
+        else if (restoreSavedQuery && !wasAt) nextQ = savedCmdQuery ?? "";
+        else nextQ = "";
+        savedCmdQuery = "";
+
+        if (txtQuery != null)
+        {
+            suppressQueryEvent = true;
+            txtQuery.Text = nextQ;
+            txtQuery.SelectionStart = txtQuery.TextLength;
+            suppressQueryEvent = false;
+        }
+
+        ApplyModeChrome();
+        RunSearch(nextQ);
+        if (txtQuery != null && !txtQuery.IsDisposed) txtQuery.Focus();
+    }
+
+    string CurrentServerDisplayLabel()
+    {
+        if (playerCtx != null && playerCtx.Servers != null)
+        {
+            for (int i = 0; i < playerCtx.Servers.Count; i++)
+            {
+                if (string.Equals(playerCtx.Servers[i].Addr, currentServerAddr, StringComparison.OrdinalIgnoreCase))
+                    return ShortServerLabel(playerCtx.Servers[i].Label);
+            }
+            if (playerCtx.Servers.Count > 0)
+                return ShortServerLabel(playerCtx.Servers[0].Label);
+        }
+        return string.IsNullOrEmpty(currentServerAddr) ? "选择服务器" : ShortServerLabel(currentServerAddr);
+    }
+
+    void RebuildPlayerRows(string filterQuery)
+    {
+        curPlayerQuery = (filterQuery ?? "").Trim();
+        bool hideBots = (playerCtx != null) ? playerCtx.HideBots : true;
+        int sortMode = (playerCtx != null) ? playerCtx.SortMode : 0;
+        List<A2SPlayerInfo> filtered = OnlinePlayerPickerForm.FilterAndSort(currentRawPlayers, curPlayerQuery, hideBots, sortMode);
+
+        playerRows = new List<PalettePlayerRow>();
+        if (!string.IsNullOrEmpty(currentTarget) && (curPlayerQuery.Length == 0 || curPlayerQuery == "^"))
+            playerRows.Add(new PalettePlayerRow { IsResetRow = true, Player = null });
+
+        for (int i = 0; i < filtered.Count; i++)
+            playerRows.Add(new PalettePlayerRow { IsResetRow = false, Player = filtered[i] });
+
+        selIdx = playerRows.Count > 0 ? 0 : -1;
+        scrollIdx = 0;
+        hoverIdx = -1;
+        UpdateCountLabel();
+        if (listPanel != null) listPanel.Invalidate();
+    }
+
+    void LoadPlayerCacheOrFetch(bool forceRefresh, string filterQuery)
+    {
+        if (!CanPickPlayer) return;
+        string addr = currentServerAddr;
+        if (string.IsNullOrEmpty(addr))
+        {
+            addr = playerCtx.Servers[0].Addr;
+            currentServerAddr = addr;
+        }
+
+        OnlinePlayerCache cached;
+        if (!forceRefresh && playerCtx.Cache != null && playerCtx.Cache.TryGetValue(addr, out cached)
+            && cached != null && (DateTime.Now - cached.FetchedAt).TotalSeconds < 15.0)
+        {
+            currentRawPlayers = cached.Players ?? new List<A2SPlayerInfo>();
+            playerLoading = false;
+            playerStatusNote = "";
+            RebuildPlayerRows(filterQuery);
+            return;
+        }
+
+        int seq = ++playerQuerySeq;
+        playerLoading = true;
+        playerStatusNote = "正在获取玩家列表…";
+        currentRawPlayers = new List<A2SPlayerInfo>();
+        RebuildPlayerRows(filterQuery);
+        Invalidate(RefreshPillRect);
+
+        Task.Run(delegate
+        {
+            string host;
+            int port;
+            bool ok = false;
+            int ping = -1;
+            var players = new List<A2SPlayerInfo>();
+            if (MainForm.ParseHostPort(addr, out host, out port))
+                ok = MainForm.A2SPlayersQuery(host, port, 1800, out players, out ping);
+
+            if (IsDisposed) return;
+            try
+            {
+                BeginInvoke(new Action(delegate
+                {
+                    if (IsDisposed || !playerMode || seq != playerQuerySeq) return;
+                    playerLoading = false;
+                    if (!ok)
+                    {
+                        currentRawPlayers = new List<A2SPlayerInfo>();
+                        playerStatusNote = "连不上服务器或已离线，按 F5 重试或切换服务器";
+                        RebuildPlayerRows(CurrentPlayerQueryText());
+                        Invalidate(RefreshPillRect);
+                        return;
+                    }
+                    if (playerCtx.Cache != null)
+                    {
+                        playerCtx.Cache[addr] = new OnlinePlayerCache
+                        {
+                            Players = players,
+                            PingMs = ping,
+                            FetchedAt = DateTime.Now
+                        };
+                    }
+                    currentRawPlayers = players;
+                    playerStatusNote = players.Count == 0 ? "当前服务器没人在线" : "";
+                    RebuildPlayerRows(CurrentPlayerQueryText());
+                    Invalidate(RefreshPillRect);
+                }));
+            }
+            catch { }
+        });
+    }
+
+    string CurrentPlayerQueryText()
+    {
+        if (txtQuery == null) return "";
+        string txt = txtQuery.Text ?? "";
+        string pq;
+        if (playerModeByAt && TryParseInlinePlayerQuery(txt, out pq)) return pq;
+        return txt.Trim();
+    }
+
+    void LocateMyServerInPaletteAsync()
+    {
+        if (!CanPickPlayer) return;
+        string target = (playerCtx.MySteamName ?? "").Trim();
+        if (string.IsNullOrEmpty(target)) return;
+
+        int seq = ++playerQuerySeq;
+        playerLoading = true;
+        playerStatusNote = "正在查找你所在的服务器…";
+        currentRawPlayers = new List<A2SPlayerInfo>();
+        RebuildPlayerRows(CurrentPlayerQueryText());
+        Invalidate(RefreshPillRect);
+
+        var snapshot = new List<OnlineServerEntry>(playerCtx.Servers);
+        Task.Run(delegate
+        {
+            int n = snapshot.Count;
+            var results = new OnlinePlayerCache[n];
+            using (var gate = new SemaphoreSlim(8, 8))
+            using (var done = new CountdownEvent(n))
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    int ix = i;
+                    ThreadPool.QueueUserWorkItem(delegate
+                    {
+                        try
+                        {
+                            gate.Wait();
+                            try
+                            {
+                                string host;
+                                int port;
+                                List<A2SPlayerInfo> plist;
+                                int ping;
+                                if (MainForm.ParseHostPort(snapshot[ix].Addr, out host, out port)
+                                    && MainForm.A2SPlayersQuery(host, port, 1400, out plist, out ping))
+                                {
+                                    results[ix] = new OnlinePlayerCache
+                                    {
+                                        Players = plist,
+                                        PingMs = ping,
+                                        FetchedAt = DateTime.Now
+                                    };
+                                }
+                            }
+                            finally { try { gate.Release(); } catch { } }
+                        }
+                        catch { }
+                        finally { try { done.Signal(); } catch { } }
+                    });
+                }
+                done.Wait(4500);
+            }
+
+            if (IsDisposed) return;
+            try
+            {
+                BeginInvoke(new Action(delegate
+                {
+                    if (IsDisposed || !playerMode || seq != playerQuerySeq) return;
+                    playerLoading = false;
+                    int exactIdx = -1;
+                    int fuzzyIdx = -1;
+                    for (int i = 0; i < n; i++)
+                    {
+                        OnlinePlayerCache oc = results[i];
+                        if (oc == null) continue;
+                        if (playerCtx.Cache != null) playerCtx.Cache[snapshot[i].Addr] = oc;
+                        for (int j = 0; j < oc.Players.Count; j++)
+                        {
+                            string pn = (oc.Players[j].Name ?? "").Trim();
+                            if (string.Equals(pn, target, StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (exactIdx < 0) exactIdx = i;
+                            }
+                            else if (pn.IndexOf(target, StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                if (fuzzyIdx < 0) fuzzyIdx = i;
+                            }
+                        }
+                    }
+
+                    int found = (exactIdx >= 0) ? exactIdx : fuzzyIdx;
+                    if (found >= 0)
+                    {
+                        currentServerAddr = snapshot[found].Addr;
+                        if (playerCtx.OnServerChanged != null) playerCtx.OnServerChanged(currentServerAddr);
+                        currentRawPlayers = results[found].Players ?? new List<A2SPlayerInfo>();
+                        playerStatusNote = "";
+                        RebuildPlayerRows(CurrentPlayerQueryText());
+                        Invalidate();
+                    }
+                    else
+                    {
+                        playerStatusNote = "没在在线服务器里找到 " + target;
+                        UpdateCountLabel();
+                        if (listPanel != null) listPanel.Invalidate();
+                        Invalidate(RefreshPillRect);
+                    }
+                }));
+            }
+            catch { }
+        });
+    }
+
+    void ApplyTargetAndReturn(string newTarget)
+    {
+        currentTarget = (newTarget ?? "").Trim();
+        if (playerCtx != null && playerCtx.OnTargetChanged != null)
+            playerCtx.OnTargetChanged(currentTarget);
+        ExitPlayerMode(!playerModeByAt, playerModeByAt ? "" : null);
+    }
+
+    void CommitSelectedPlayer(bool copyOnly)
+    {
+        if (selIdx < 0 || selIdx >= playerRows.Count) return;
+        PalettePlayerRow row = playerRows[selIdx];
+        if (row.IsResetRow || row.Player == null)
+        {
+            if (!copyOnly) ApplyTargetAndReturn("");
+            return;
+        }
+        string rawName = row.Player.Name ?? "";
+        if (copyOnly)
+        {
+            menuTriggeredPaletteClose = true;
+            Close();
+            if (playerCtx != null && playerCtx.OnCopyPlayerName != null)
+                playerCtx.OnCopyPlayerName(rawName, false);
+            return;
+        }
+        ApplyTargetAndReturn(rawName);
+    }
+
+    bool IsSelfPlayer(string name)
+    {
+        if (playerCtx == null || string.IsNullOrEmpty(playerCtx.MySteamName) || string.IsNullOrEmpty(name)) return false;
+        string s = playerCtx.MySteamName.Trim();
+        if (s.Length == 0) return false;
+        return string.Equals(name.Trim(), s, StringComparison.OrdinalIgnoreCase)
+            || name.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    void CloseActiveMenu()
+    {
+        if (activePopupMenu != null)
+        {
+            try { activePopupMenu.Close(); } catch { }
+            try { activePopupMenu.Dispose(); } catch { }
+            activePopupMenu = null;
+        }
+    }
+
+    ContextMenuStrip CreateThemedMenu()
+    {
+        CloseActiveMenu();
+        var menu = new ContextMenuStrip();
+        menu.ShowImageMargin = false;
+        menu.BackColor = ThemePalette.SurfaceAlt;
+        menu.ForeColor = ThemePalette.TextPrimary;
+        menu.Font = fTitle;
+        menu.Renderer = new ToolStripProfessionalRenderer(new PaletteMenuColorTable());
+        menu.Closed += delegate
+        {
+            BeginInvoke((MethodInvoker)delegate
+            {
+                suppressDeactivateClose = false;
+                if (!menuTriggeredPaletteClose && !IsDisposed && Visible)
+                {
+                    Native.MakeTopmost(Handle);
+                    Activate();
+                    if (txtQuery != null && !txtQuery.IsDisposed) txtQuery.Focus();
+                }
+            });
+        };
+        activePopupMenu = menu;
+        return menu;
+    }
+
+    void ShowServerPickerMenu()
+    {
+        if (!CanPickPlayer) return;
+        ContextMenuStrip menu = CreateThemedMenu();
+        string myNm = (playerCtx.MySteamName ?? "").Trim();
+        if (!string.IsNullOrEmpty(myNm))
+        {
+            var miLoc = new ToolStripMenuItem("查找我在哪个服（" + myNm + "）");
+            miLoc.ForeColor = ThemePalette.AccentSoftFg;
+            miLoc.Click += delegate { LocateMyServerInPaletteAsync(); };
+            menu.Items.Add(miLoc);
+            menu.Items.Add(new ToolStripSeparator());
+        }
+        for (int i = 0; i < playerCtx.Servers.Count; i++)
+        {
+            OnlineServerEntry srv = playerCtx.Servers[i];
+            bool cur = string.Equals(srv.Addr, currentServerAddr, StringComparison.OrdinalIgnoreCase);
+            var mi = new ToolStripMenuItem((cur ? "✓ " : "    ") + (srv.Label ?? srv.Addr));
+            if (cur) mi.ForeColor = ThemePalette.AccentSoftFg;
+            string addrCopy = srv.Addr;
+            mi.Click += delegate
+            {
+                currentServerAddr = addrCopy;
+                if (playerCtx.OnServerChanged != null) playerCtx.OnServerChanged(currentServerAddr);
+                LoadPlayerCacheOrFetch(false, CurrentPlayerQueryText());
+                Invalidate();
+            };
+            menu.Items.Add(mi);
+        }
+        menuTriggeredPaletteClose = false;
+        suppressDeactivateClose = true;
+        Rectangle rc = ServerPillRect;
+        menu.Show(this, new Point(rc.Left, rc.Bottom + 3));
+    }
+
+    void ShowPlayerRowContextMenu(A2SPlayerInfo p, Point screenPt)
+    {
+        if (p == null) return;
+        ContextMenuStrip menu = CreateThemedMenu();
+        string nm = p.Name ?? "";
+
+        var miTarget = new ToolStripMenuItem("设为当前目标");
+        miTarget.Click += delegate { ApplyTargetAndReturn(nm); };
+        menu.Items.Add(miTarget);
+
+        var miCopy = new ToolStripMenuItem("复制昵称");
+        miCopy.Click += delegate
+        {
+            menuTriggeredPaletteClose = true;
+            Close();
+            if (playerCtx != null && playerCtx.OnCopyPlayerName != null)
+                playerCtx.OnCopyPlayerName(nm, false);
+        };
+        menu.Items.Add(miCopy);
+
+        var miQuote = new ToolStripMenuItem("复制昵称（带引号）");
+        miQuote.Click += delegate
+        {
+            menuTriggeredPaletteClose = true;
+            Close();
+            if (playerCtx != null && playerCtx.OnCopyPlayerName != null)
+                playerCtx.OnCopyPlayerName(nm, true);
+        };
+        menu.Items.Add(miQuote);
+
+        menuTriggeredPaletteClose = false;
+        suppressDeactivateClose = true;
+        menu.Show(screenPt);
     }
 
     int VisibleRows { get { return Math.Max(1, listPanel.ClientSize.Height / CurrentRowH); } }
@@ -921,13 +1562,18 @@ public class CommandPaletteForm : Form
         if (selIdx < 0) return;
         if (selIdx < scrollIdx) scrollIdx = selIdx;
         else if (selIdx >= scrollIdx + VisibleRows) scrollIdx = selIdx - VisibleRows + 1;
-        int maxSc = Math.Max(0, matches.Count - VisibleRows);
+        int maxSc = Math.Max(0, CurrentItemCount - VisibleRows);
         if (scrollIdx > maxSc) scrollIdx = maxSc;
         if (scrollIdx < 0) scrollIdx = 0;
     }
 
     void ExecuteSelected(bool forceUlx)
     {
+        if (playerMode)
+        {
+            CommitSelectedPlayer(forceUlx);
+            return;
+        }
         if (selIdx < 0 || selIdx >= matches.Count) return;
         PaletteEntry item = matches[selIdx];
         bool useU = forceUlx || ulxMode;
@@ -941,16 +1587,24 @@ public class CommandPaletteForm : Form
         bool shift = (keyData & Keys.Shift) != 0;
         bool ctrl = (keyData & Keys.Control) != 0;
 
+        if (ctrl && key == Keys.T && CanPickPlayer)
+        {
+            if (playerMode) ExitPlayerMode(true, null);
+            else EnterPlayerMode(false, "");
+            return true;
+        }
         if (key == Keys.Escape)
         {
-            Close();
+            if (playerMode) ExitPlayerMode(!playerModeByAt, playerModeByAt ? "" : null);
+            else Close();
             return true;
         }
         if (key == Keys.Down)
         {
-            if (matches.Count > 0)
+            int cnt = CurrentItemCount;
+            if (cnt > 0)
             {
-                selIdx = (selIdx + 1) % matches.Count;
+                selIdx = (selIdx + 1) % cnt;
                 EnsureSelVisible();
                 listPanel.Invalidate();
             }
@@ -958,9 +1612,10 @@ public class CommandPaletteForm : Form
         }
         if (key == Keys.Up)
         {
-            if (matches.Count > 0)
+            int cnt = CurrentItemCount;
+            if (cnt > 0)
             {
-                selIdx = (selIdx <= 0) ? (matches.Count - 1) : (selIdx - 1);
+                selIdx = (selIdx <= 0) ? (cnt - 1) : (selIdx - 1);
                 EnsureSelVisible();
                 listPanel.Invalidate();
             }
@@ -971,14 +1626,19 @@ public class CommandPaletteForm : Form
             ExecuteSelected(shift);
             return true;
         }
-        if (key == Keys.Tab)
+        if (playerMode && key == Keys.F5)
+        {
+            LoadPlayerCacheOrFetch(true, CurrentPlayerQueryText());
+            return true;
+        }
+        if (!playerMode && key == Keys.Tab)
         {
             ulxMode = !ulxMode;
             segMode.SetSelectedSilent(ulxMode ? 1 : 0);
             listPanel.Invalidate();
             return true;
         }
-        if (ctrl && key == Keys.P)
+        if (!playerMode && ctrl && key == Keys.P)
         {
             if (selIdx >= 0 && selIdx < matches.Count && onTogglePin != null)
             {
@@ -992,13 +1652,21 @@ public class CommandPaletteForm : Form
 
     static void DrawFooterPill(Graphics g, Font font, Rectangle rc, string text, bool hovered)
     {
-        using (var bg = new SolidBrush(hovered ? ThemePalette.Hover : ThemePalette.CodeChipBg))
+        DrawFooterPill(g, font, rc, text, hovered, false);
+    }
+
+    static void DrawFooterPill(Graphics g, Font font, Rectangle rc, string text, bool hovered, bool active)
+    {
+        if (rc.IsEmpty || rc.Width < 4 || rc.Height < 4) return;
+        Color fill = hovered ? ThemePalette.Hover : (active ? ThemePalette.AccentSoft : ThemePalette.CodeChipBg);
+        Color border = (hovered || active) ? ThemePalette.Accent : ThemePalette.CodeChipEdge;
+        Color fg = (hovered || active) ? ThemePalette.AccentSoftFg : ThemePalette.TextSecondary;
+        using (var bg = new SolidBrush(fill))
             Native.FillRoundedRect(g, bg, rc, 5);
-        using (var edge = new Pen(hovered ? ThemePalette.Accent : ThemePalette.CodeChipEdge, 1f))
+        using (var edge = new Pen(border, 1f))
             Native.DrawRoundedRect(g, edge, rc, 5);
-        TextRenderer.DrawText(g, text, font, rc,
-            hovered ? ThemePalette.AccentSoftFg : ThemePalette.TextSecondary,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+        TextRenderer.DrawText(g, text, font, new Rectangle(rc.X + 4, rc.Y, Math.Max(4, rc.Width - 8), rc.Height),
+            fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -1007,7 +1675,11 @@ public class CommandPaletteForm : Form
         g.Clear(ThemePalette.Elevated);
 
         bool side = IsSideMode;
-        string tgt = string.IsNullOrEmpty(currentTarget) ? "目标：^ (自己)" : ("目标：" + currentTarget);
+        string tgtText;
+        if (CanPickPlayer)
+            tgtText = string.IsNullOrEmpty(currentTarget) ? "目标：^ (自己) ▾" : ("目标：" + currentTarget + " ▾");
+        else
+            tgtText = string.IsNullOrEmpty(currentTarget) ? "目标：^ (自己)" : ("目标：" + currentTarget);
 
         // 搜索放大镜图标
         Rectangle searchRc = side ? new Rectangle(14, 15, 18, 18) : new Rectangle(15, 17, 18, 18);
@@ -1022,29 +1694,36 @@ public class CommandPaletteForm : Form
             g.DrawLine(sep, 0, botSepY, Width, botSepY);
         }
 
+        if (playerMode)
+        {
+            DrawFooterPill(g, fFooter, ServerPillRect, CurrentServerDisplayLabel() + " ▾", serverPillHover, true);
+            DrawFooterPill(g, fFooter, RefreshPillRect, playerLoading ? "…" : "↻", refreshPillHover, false);
+        }
+
+        bool tgtActive = playerMode || !string.IsNullOrEmpty(currentTarget);
+        DrawFooterPill(g, fFooter, TargetPillRect, tgtText, targetPillHover, tgtActive);
+
         if (side)
         {
-            TextRenderer.DrawText(g, tgt, fFooter, new Rectangle(134, 48, Math.Max(40, Width - 200), 26),
-                string.IsNullOrEmpty(currentTarget) ? ThemePalette.TextMuted : ThemePalette.AccentSoftFg,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
-
-            TextRenderer.DrawText(g, "↑↓ · Enter 复制 · Shift+Enter ulx · Tab",
+            string hint = playerMode
+                ? "Enter 设目标 · Shift+Enter 复制名字 · Esc"
+                : (CanPickPlayer ? "↑↓ 选择 · Enter 复制 · @ 选人 · Tab 切写法" : "↑↓ 选择 · Enter 复制 · Shift+Enter 控制台 · Tab");
+            TextRenderer.DrawText(g, hint,
                 fFooter, new Rectangle(12, Height - 34, Math.Max(60, Width - 182), 30), ThemePalette.TextMuted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
         }
         else
         {
-            TextRenderer.DrawText(g, "↑↓ 选 · Enter 复制 · Shift+Enter ulx · Ctrl+P 收藏 · Tab 写法",
+            string hint = playerMode
+                ? "↑↓ 选择 · Enter 设为目标 · Shift+Enter 复制名字 · F5 刷新 · Esc 返回"
+                : (CanPickPlayer ? "↑↓ 选择 · Enter 复制 · Shift+Enter 控制台 · @ 选人 · Ctrl+P 收藏" : "↑↓ 选择 · Enter 复制 · Shift+Enter 控制台 · Ctrl+P 收藏 · Tab 切写法");
+            TextRenderer.DrawText(g, hint,
                 fFooter, new Rectangle(12, Height - 30, Math.Max(80, Width - 344), 26), ThemePalette.TextMuted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
-
-            TextRenderer.DrawText(g, tgt, fFooter, new Rectangle(Width - 170, Height - 30, 158, 26),
-                string.IsNullOrEmpty(currentTarget) ? ThemePalette.TextMuted : ThemePalette.AccentSoftFg,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
         }
 
         DrawFooterPill(g, fFooter, DockPillRect, "位置: " + DockModeLabel(dockMode), dockPillHover);
-        string opTxt = (opacityPct >= 100) ? "不透明 100%" : ("半透明 " + opacityPct + "%");
+        string opTxt = (opacityPct >= 100) ? "不透明" : ("透明 " + opacityPct + "%");
         DrawFooterPill(g, fFooter, OpacityPillRect, opTxt, opacityPillHover);
 
         // 外轮廓圆角描边
@@ -1057,6 +1736,9 @@ public class CommandPaletteForm : Form
         base.OnMouseMove(e);
         bool hitDock = DockPillRect.Contains(e.Location);
         bool hitOp = OpacityPillRect.Contains(e.Location);
+        bool hitTgt = CanPickPlayer && TargetPillRect.Contains(e.Location);
+        bool hitSrv = playerMode && ServerPillRect.Contains(e.Location);
+        bool hitRef = playerMode && RefreshPillRect.Contains(e.Location);
         if (hitDock != dockPillHover)
         {
             dockPillHover = hitDock;
@@ -1067,7 +1749,22 @@ public class CommandPaletteForm : Form
             opacityPillHover = hitOp;
             Invalidate(OpacityPillRect);
         }
-        Cursor = (hitDock || hitOp) ? Cursors.Hand : Cursors.Default;
+        if (hitTgt != targetPillHover)
+        {
+            targetPillHover = hitTgt;
+            Invalidate(TargetPillRect);
+        }
+        if (hitSrv != serverPillHover)
+        {
+            serverPillHover = hitSrv;
+            Invalidate(ServerPillRect);
+        }
+        if (hitRef != refreshPillHover)
+        {
+            refreshPillHover = hitRef;
+            Invalidate(RefreshPillRect);
+        }
+        Cursor = (hitDock || hitOp || hitTgt || hitSrv || hitRef) ? Cursors.Hand : Cursors.Default;
     }
 
     protected override void OnMouseLeave(EventArgs e)
@@ -1083,18 +1780,66 @@ public class CommandPaletteForm : Form
             opacityPillHover = false;
             Invalidate(OpacityPillRect);
         }
+        if (targetPillHover)
+        {
+            targetPillHover = false;
+            Invalidate(TargetPillRect);
+        }
+        if (serverPillHover)
+        {
+            serverPillHover = false;
+            Invalidate(ServerPillRect);
+        }
+        if (refreshPillHover)
+        {
+            refreshPillHover = false;
+            Invalidate(RefreshPillRect);
+        }
         Cursor = Cursors.Default;
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        if (e.Button == MouseButtons.Right)
+        {
+            if (TargetPillRect.Contains(e.Location) && !string.IsNullOrEmpty(currentTarget))
+            {
+                currentTarget = "";
+                if (playerCtx != null && playerCtx.OnTargetChanged != null)
+                    playerCtx.OnTargetChanged("");
+                if (playerMode) RebuildPlayerRows(CurrentPlayerQueryText());
+                if (listPanel != null) listPanel.Invalidate();
+                Invalidate(TargetPillRect);
+            }
+            return;
+        }
         if (e.Button != MouseButtons.Left) return;
+        if (playerMode && ServerPillRect.Contains(e.Location))
+        {
+            ShowServerPickerMenu();
+            return;
+        }
+        if (playerMode && RefreshPillRect.Contains(e.Location))
+        {
+            LoadPlayerCacheOrFetch(true, CurrentPlayerQueryText());
+            if (txtQuery != null && !txtQuery.IsDisposed) txtQuery.Focus();
+            return;
+        }
+        if (CanPickPlayer && TargetPillRect.Contains(e.Location))
+        {
+            if (playerMode) ExitPlayerMode(!playerModeByAt, playerModeByAt ? "" : null);
+            else EnterPlayerMode(false, "");
+            return;
+        }
         if (DockPillRect.Contains(e.Location))
         {
             dockMode = NextDockMode(dockMode);
             dockPillHover = false;
             opacityPillHover = false;
+            targetPillHover = false;
+            serverPillHover = false;
+            refreshPillHover = false;
             Cursor = Cursors.Default;
             ApplyDockLayout(true);
             if (onDockChanged != null) onDockChanged(dockMode);
@@ -1118,6 +1863,118 @@ public class CommandPaletteForm : Form
         base.OnMouseWheel(e);
     }
 
+    void OnPlayerListPaint(Graphics g, int w, int h)
+    {
+        if (playerRows.Count == 0)
+        {
+            string msg = playerLoading
+                ? "正在获取玩家列表…"
+                : (!string.IsNullOrEmpty(playerStatusNote) ? playerStatusNote : "没找到在线玩家，换个词或清空看全部");
+            TextRenderer.DrawText(g, msg, fTitle,
+                new Rectangle(20, 40, Math.Max(40, w - 40), 40), ThemePalette.TextMuted,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+            return;
+        }
+
+        int rh = CurrentRowH;
+        int vis = VisibleRows + 1;
+        int rankBase = 0;
+        for (int k = 0; k < scrollIdx && k < playerRows.Count; k++)
+            if (!playerRows[k].IsResetRow) rankBase++;
+
+        for (int vi = 0; vi < vis; vi++)
+        {
+            int idx = scrollIdx + vi;
+            if (idx >= playerRows.Count) break;
+            int y = vi * rh;
+            if (y >= h) break;
+
+            PalettePlayerRow row = playerRows[idx];
+            bool sel = (idx == selIdx);
+            bool hov = (!sel && idx == hoverIdx);
+            Rectangle rowRc = new Rectangle(6, y + 2, w - 12, rh - 4);
+
+            if (sel)
+            {
+                using (var sb = new SolidBrush(ThemePalette.Selected))
+                    Native.FillRoundedRect(g, sb, rowRc, 7);
+                using (var ab = new SolidBrush(ThemePalette.Accent))
+                    Native.FillRoundedRect(g, ab, new Rectangle(rowRc.X + 2, rowRc.Y + 7, 3, rowRc.Height - 14), 2);
+            }
+            else if (hov)
+            {
+                using (var hb = new SolidBrush(ThemePalette.Hover))
+                    Native.FillRoundedRect(g, hb, rowRc, 7);
+            }
+
+            if (row.IsResetRow || row.Player == null)
+            {
+                var resetTag = new Rectangle(rowRc.X + 10, rowRc.Y + (rowRc.Height - 20) / 2, 26, 20);
+                using (var rb = new SolidBrush(ThemePalette.CodeChipBg))
+                    Native.FillRoundedRect(g, rb, resetTag, 5);
+                TextRenderer.DrawText(g, "^", fCode, resetTag, ThemePalette.TextSecondary,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+
+                int rightW = 140;
+                TextRenderer.DrawText(g, "当前：" + currentTarget, fFooter,
+                    new Rectangle(rowRc.Right - rightW - 10, rowRc.Y, rightW, rowRc.Height), ThemePalette.TextMuted,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+
+                TextRenderer.DrawText(g, "重置为自己（^）", fTitle,
+                    new Rectangle(resetTag.Right + 10, rowRc.Y, Math.Max(60, rowRc.Width - rightW - 60), rowRc.Height),
+                    sel ? ThemePalette.AccentSoftFg : ThemePalette.TextPrimary,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+                continue;
+            }
+
+            rankBase++;
+            A2SPlayerInfo p = row.Player;
+            string pName = p.Name ?? "";
+            bool isCur = !string.IsNullOrEmpty(currentTarget) && string.Equals(pName.Trim(), currentTarget.Trim(), StringComparison.OrdinalIgnoreCase);
+            bool isMe = IsSelfPlayer(pName);
+
+            Rectangle rankRc = new Rectangle(rowRc.X + 10, rowRc.Y, 30, rowRc.Height);
+            TextRenderer.DrawText(g, isCur ? "✓" : ("#" + rankBase), isCur ? fTitle : fFooter, rankRc,
+                isCur ? ThemePalette.Accent : ThemePalette.TextMuted,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+
+            int nameLeft = rankRc.Right + 2;
+            if (isMe)
+            {
+                Rectangle meRc = new Rectangle(nameLeft, rowRc.Y + (rowRc.Height - 18) / 2, 22, 18);
+                using (var mb = new SolidBrush(ThemePalette.Accent))
+                    Native.FillRoundedRect(g, mb, meRc, 4);
+                TextRenderer.DrawText(g, "我", fBadge, meRc, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+                nameLeft += 27;
+            }
+            else if (p.IsBot)
+            {
+                Rectangle botRc = new Rectangle(nameLeft, rowRc.Y + (rowRc.Height - 18) / 2, 30, 18);
+                using (var bb = new SolidBrush(ThemePalette.CodeChipBg))
+                    Native.FillRoundedRect(g, bb, botRc, 4);
+                TextRenderer.DrawText(g, "BOT", fBadge, botRc, ThemePalette.TextMuted,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+                nameLeft += 35;
+            }
+
+            int durW = 48;
+            int scoreW = 54;
+            Rectangle durRc = new Rectangle(rowRc.Right - durW - 10, rowRc.Y, durW, rowRc.Height);
+            Rectangle scoreRc = new Rectangle(durRc.Left - scoreW - 6, rowRc.Y, scoreW, rowRc.Height);
+            Color durCol = (p.DurationSec < 60 && !p.IsBot) ? ThemePalette.Success : ThemePalette.TextMuted;
+            TextRenderer.DrawText(g, A2SPlayerInfo.FormatDuration(p.DurationSec), fFooter, durRc, durCol,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            TextRenderer.DrawText(g, p.Score + " 分", fFooter, scoreRc, ThemePalette.TextSecondary,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+
+            int nameW = Math.Max(40, scoreRc.Left - nameLeft - 8);
+            TextRenderer.DrawText(g, pName, fTitle, new Rectangle(nameLeft, rowRc.Y, nameW, rowRc.Height),
+                (sel || isCur) ? ThemePalette.AccentSoftFg : ThemePalette.TextPrimary,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+        }
+    }
+
     void OnListPaint(object sender, PaintEventArgs e)
     {
         Graphics g = e.Graphics;
@@ -1125,9 +1982,15 @@ public class CommandPaletteForm : Form
         int w = listPanel.ClientSize.Width;
         int h = listPanel.ClientSize.Height;
 
+        if (playerMode)
+        {
+            OnPlayerListPaint(g, w, h);
+            return;
+        }
+
         if (matches.Count == 0)
         {
-            TextRenderer.DrawText(g, "没有找到匹配指令（支持全拼/简拼、代码、备注跨表搜索）", fTitle,
+            TextRenderer.DrawText(g, "没找到匹配的指令，换个词或拼音试试", fTitle,
                 new Rectangle(20, 40, w - 40, 32), ThemePalette.TextMuted,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             return;
@@ -1254,7 +2117,7 @@ public class CommandPaletteForm : Form
     void OnListMouseMove(object sender, MouseEventArgs e)
     {
         int idx = scrollIdx + (e.Y / CurrentRowH);
-        if (idx < 0 || idx >= matches.Count) idx = -1;
+        if (idx < 0 || idx >= CurrentItemCount) idx = -1;
         if (idx != hoverIdx)
         {
             hoverIdx = idx;
@@ -1265,10 +2128,27 @@ public class CommandPaletteForm : Form
 
     void OnListMouseDown(object sender, MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left) return;
         int rh = CurrentRowH;
         int idx = scrollIdx + (e.Y / rh);
-        if (idx < 0 || idx >= matches.Count) return;
+        if (idx < 0 || idx >= CurrentItemCount) return;
+
+        if (playerMode)
+        {
+            selIdx = idx;
+            listPanel.Invalidate();
+            if (e.Button == MouseButtons.Right)
+            {
+                PalettePlayerRow row = playerRows[idx];
+                if (!row.IsResetRow && row.Player != null)
+                    ShowPlayerRowContextMenu(row.Player, listPanel.PointToScreen(e.Location));
+                return;
+            }
+            if (e.Button == MouseButtons.Left)
+                CommitSelectedPlayer((Control.ModifierKeys & Keys.Shift) != 0);
+            return;
+        }
+
+        if (e.Button != MouseButtons.Left) return;
         selIdx = idx;
         bool hitStar = IsSideMode ? (e.X <= 34 && (e.Y % rh) <= 30) : (e.X <= 30);
         if (hitStar && onTogglePin != null)
@@ -1288,7 +2168,7 @@ public class CommandPaletteForm : Form
             return;
         }
         int delta = (e.Delta > 0) ? -2 : 2;
-        int maxSc = Math.Max(0, matches.Count - VisibleRows);
+        int maxSc = Math.Max(0, CurrentItemCount - VisibleRows);
         scrollIdx = Math.Max(0, Math.Min(maxSc, scrollIdx + delta));
         listPanel.Invalidate();
     }
@@ -1297,6 +2177,7 @@ public class CommandPaletteForm : Form
     {
         if (disposing)
         {
+            CloseActiveMenu();
             StopSlideTimer();
             if (fQuery != null) { fQuery.Dispose(); fQuery = null; }
             if (fTitle != null) { fTitle.Dispose(); fTitle = null; }

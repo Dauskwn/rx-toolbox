@@ -17,8 +17,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("GMod 挤服助手 + 屏幕准星 + 对局倒计时 + 自定义常用文本")]
 #endif
 [assembly: AssemblyCompany("RXToolbox")]
-[assembly: AssemblyVersion("1.9.0.0")]
-[assembly: AssemblyFileVersion("1.9.0.0")]
+[assembly: AssemblyVersion("1.9.1.0")]
+[assembly: AssemblyFileVersion("1.9.1.0")]
 
 static class Program
 {
@@ -377,7 +377,9 @@ static class Program
         }
 
         Native.LogPath = Path.Combine(dataDir, "rx.log");
+#if ADMIN_EDITION
         string phrases = Path.Combine(dataDir, "phrases.json");
+#endif
         // 升级重启后（afterUpdate=true）先保留 .old 到窗体 OnShown 成功后再清理，确保构造崩溃还能回滚
         if (!afterUpdate)
         {

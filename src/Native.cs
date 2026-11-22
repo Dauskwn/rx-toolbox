@@ -174,6 +174,7 @@ public static class Native
 
     public struct RECT { public int L, T, R, B; }
 
+    public const int WM_RX_WAKE = 0x8001;
     static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     static readonly object logLock = new object();
 
@@ -232,6 +233,27 @@ public static class Native
 
     public static string LogPath = "";
 
+    static readonly Dictionary<string, long> warnTicks = new Dictionary<string, long>();
+
+    public static void LogWarn(string tag, Exception ex)
+    {
+        if (ex == null || string.IsNullOrEmpty(LogPath)) return;
+        string msg = (ex.Message ?? "").Replace('\r', ' ').Replace('\n', ' ');
+        if (msg.Length > 200) msg = msg.Substring(0, 200);
+        string t = string.IsNullOrEmpty(tag) ? "app" : tag;
+        string key = t + "|" + ex.GetType().Name + "|" + msg;
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        long window = System.Diagnostics.Stopwatch.Frequency * 5L;
+        lock (logLock)
+        {
+            long prev;
+            if (warnTicks.TryGetValue(key, out prev) && (now - prev) < window) return;
+            if (warnTicks.Count >= 64) warnTicks.Clear();
+            warnTicks[key] = now;
+        }
+        Log("[WARN] " + t + ": " + ex.GetType().Name + " - " + msg);
+    }
+
     public static void Log(string s)
     {
         if (string.IsNullOrEmpty(LogPath)) return;
@@ -254,6 +276,40 @@ public static class Native
             }
         }
         catch { }
+    }
+
+    public static long GetLogSizeBytes()
+    {
+        if (string.IsNullOrEmpty(LogPath)) return 0;
+        try
+        {
+            lock (logLock)
+            {
+                long total = 0;
+                var fi = new FileInfo(LogPath);
+                if (fi.Exists) total += fi.Length;
+                var fiOld = new FileInfo(LogPath + ".old");
+                if (fiOld.Exists) total += fiOld.Length;
+                return total;
+            }
+        }
+        catch { return 0; }
+    }
+
+    public static bool ClearLog()
+    {
+        if (string.IsNullOrEmpty(LogPath)) return false;
+        try
+        {
+            lock (logLock)
+            {
+                if (File.Exists(LogPath)) File.Delete(LogPath);
+                string bak = LogPath + ".old";
+                if (File.Exists(bak)) File.Delete(bak);
+                return true;
+            }
+        }
+        catch { return false; }
     }
 
     public static int PidOf(IntPtr h)
@@ -334,23 +390,41 @@ public static class Native
                         if (targetHwnd == IntPtr.Zero)
                         {
                             int targetPid = p.Id;
+                            IntPtr visibleTitleMatch = IntPtr.Zero;
+                            IntPtr visibleAny = IntPtr.Zero;
+                            IntPtr hiddenTitleMatch = IntPtr.Zero;
                             EnumWindows(delegate(IntPtr h, IntPtr l)
                             {
                                 uint wpid;
                                 GetWindowThreadProcessId(h, out wpid);
-                                if ((int)wpid == targetPid && IsWindowVisible(h))
+                                if ((int)wpid != targetPid) return true;
+                                var titleSb = new StringBuilder(128);
+                                GetWindowTextW(h, titleSb, titleSb.Capacity);
+                                string wt = titleSb.ToString();
+                                bool isMainTitle = wt.StartsWith("RX 工具箱", StringComparison.Ordinal);
+                                if (IsWindowVisible(h))
                                 {
-                                    targetHwnd = h;
-                                    return false;
+                                    if (isMainTitle && visibleTitleMatch == IntPtr.Zero) visibleTitleMatch = h;
+                                    if (visibleAny == IntPtr.Zero) visibleAny = h;
+                                }
+                                else if (isMainTitle && hiddenTitleMatch == IntPtr.Zero)
+                                {
+                                    hiddenTitleMatch = h;
                                 }
                                 return true;
                             }, IntPtr.Zero);
+                            targetHwnd = visibleTitleMatch != IntPtr.Zero ? visibleTitleMatch
+                                : (visibleAny != IntPtr.Zero ? visibleAny : hiddenTitleMatch);
                         }
                         if (targetHwnd != IntPtr.Zero)
                         {
-                            if (IsIconic(targetHwnd)) ShowWindow(targetHwnd, 9);
-                            else ShowWindow(targetHwnd, 5);
-                            SetForegroundWindow(targetHwnd);
+                            PostMessage(targetHwnd, (uint)WM_RX_WAKE, IntPtr.Zero, IntPtr.Zero);
+                            if (IsWindowVisible(targetHwnd))
+                            {
+                                if (IsIconic(targetHwnd)) ShowWindow(targetHwnd, 9);
+                                else ShowWindow(targetHwnd, 5);
+                                SetForegroundWindow(targetHwnd);
+                            }
                             activated = true;
                         }
                     }
@@ -575,4 +649,15 @@ public static class Native
             if (screenDc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDc);
         }
     }
+
+    [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+    public static extern void CopyMemory(IntPtr dest, IntPtr src, UIntPtr count);
+}
+
+[ComImport]
+[Guid("5b0d3235-4dba-4d44-865e-8f1d0e4fd04d")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMemoryBufferByteAccess
+{
+    void GetBuffer(out IntPtr buffer, out uint capacity);
 }

@@ -31,6 +31,8 @@ public class NavRail : Control
     const int ItemH = 34;
     const int GroupH = 24;
     const int ToggleBtnH = 34;
+    int curGroupH = GroupH;
+    int curCollapsedGroupGap = 8;
 
     int hoverIdx = -1;
     bool hoverToggle = false;
@@ -82,6 +84,18 @@ public class NavRail : Control
         return null;
     }
 
+    int CalcNeededHeight(int topCount, int topGroups, int botCount, int itemH, int groupH, int toggleH, int rowGap, int groupGap, int colGap)
+    {
+        int hTop = topCount * (itemH + rowGap);
+        if (topGroups > 0)
+        {
+            if (!Collapsed) hTop += topGroups * groupH + (topGroups - 1) * groupGap;
+            else hTop += (topGroups - 1) * colGap;
+        }
+        int hBot = botCount * (itemH + rowGap) + toggleH + 14;
+        return hTop + hBot;
+    }
+
     void ComputeRects()
     {
         int n = Items.Count;
@@ -93,7 +107,45 @@ public class NavRail : Control
         int padX = Collapsed ? 7 : 8;
         int rowW = Math.Max(20, w - padX * 2);
 
-        // 顶部品牌区预留 44px
+        int topCount = 0, topGroups = 0, botCount = 0;
+        string cntGroup = null;
+        for (int i = 0; i < n; i++)
+        {
+            NavItem it = Items[i];
+            if (!it.Visible) continue;
+            if (it.Group == "BOTTOM") { botCount++; continue; }
+            topCount++;
+            if (!string.IsNullOrEmpty(it.Group) && it.Group != cntGroup)
+            {
+                topGroups++;
+                cntGroup = it.Group;
+            }
+        }
+
+        int effItemH = ItemH;
+        int effGroupH = GroupH;
+        int effToggleH = ToggleBtnH;
+        int effRowGap = 2;
+        int effGroupGap = 6;
+        int effColGap = 8;
+        int avail = Math.Max(120, h - 48 - 6);
+        if (CalcNeededHeight(topCount, topGroups, botCount, effItemH, effGroupH, effToggleH, effRowGap, effGroupGap, effColGap) > avail)
+        {
+            effRowGap = 1;
+            effGroupGap = 2;
+            effColGap = 4;
+            while (CalcNeededHeight(topCount, topGroups, botCount, effItemH, effGroupH, effToggleH, effRowGap, effGroupGap, effColGap) > avail
+                   && (effItemH > 20 || effGroupH > 15 || effToggleH > 26))
+            {
+                if (effItemH > 20) effItemH--;
+                if (CalcNeededHeight(topCount, topGroups, botCount, effItemH, effGroupH, effToggleH, effRowGap, effGroupGap, effColGap) > avail && effGroupH > 15) effGroupH--;
+                if (CalcNeededHeight(topCount, topGroups, botCount, effItemH, effGroupH, effToggleH, effRowGap, effGroupGap, effColGap) > avail && effToggleH > 26) effToggleH--;
+            }
+        }
+        curGroupH = effGroupH;
+        curCollapsedGroupGap = effColGap;
+
+        // 顶部品牌区预留 48px
         int yTop = 48;
         string lastGroup = null;
         for (int i = 0; i < n; i++)
@@ -102,27 +154,26 @@ public class NavRail : Control
             if (!it.Visible || it.Group == "BOTTOM") continue;
             if (!string.IsNullOrEmpty(it.Group) && it.Group != lastGroup)
             {
-                if (lastGroup != null) yTop += 6;
-                if (!Collapsed) yTop += GroupH;
-                else if (lastGroup != null) yTop += 8;
+                if (lastGroup != null) yTop += Collapsed ? effColGap : effGroupGap;
+                if (!Collapsed) yTop += effGroupH;
                 lastGroup = it.Group;
             }
-            itemRects[i] = new Rectangle(padX, yTop, rowW, ItemH);
-            yTop += ItemH + 2;
+            itemRects[i] = new Rectangle(padX, yTop, rowW, effItemH);
+            yTop += effItemH + effRowGap;
         }
 
         // 底部固定：先留最底部的折叠按钮
-        int yBot = h - ToggleBtnH - 8;
-        toggleRect = new Rectangle(padX, yBot, rowW, ToggleBtnH);
+        int yBot = h - effToggleH - 8;
+        toggleRect = new Rectangle(padX, yBot, rowW, effToggleH);
         yBot -= 6;
 
         for (int i = n - 1; i >= 0; i--)
         {
             NavItem it = Items[i];
             if (!it.Visible || it.Group != "BOTTOM") continue;
-            yBot -= ItemH;
-            itemRects[i] = new Rectangle(padX, yBot, rowW, ItemH);
-            yBot -= 2;
+            yBot -= effItemH;
+            itemRects[i] = new Rectangle(padX, yBot, rowW, effItemH);
+            yBot -= effRowGap;
         }
     }
 
@@ -149,9 +200,16 @@ public class NavRail : Control
 
         if (!Collapsed)
         {
-            TextRenderer.DrawText(g, "指令控制台", fBrand, new Rectangle(44, 9, w - 52, 18), ThemePalette.TextPrimary,
+#if ADMIN_EDITION
+            string navBrandTitle = "指令控制台";
+            string navBrandSub = MainForm.APP_VERSION + " 管理版";
+#else
+            string navBrandTitle = "RX 工具箱";
+            string navBrandSub = MainForm.APP_VERSION + " 玩家版";
+#endif
+            TextRenderer.DrawText(g, navBrandTitle, fBrand, new Rectangle(44, 9, w - 52, 18), ThemePalette.TextPrimary,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
-            TextRenderer.DrawText(g, MainForm.APP_VERSION + " 管理版", fBadge, new Rectangle(44, 25, w - 52, 14), ThemePalette.TextMuted,
+            TextRenderer.DrawText(g, navBrandSub, fBadge, new Rectangle(44, 25, w - 52, 14), ThemePalette.TextMuted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
         }
 
@@ -168,14 +226,15 @@ public class NavRail : Control
             {
                 if (!Collapsed)
                 {
-                    Rectangle gr = new Rectangle(14, rc.Y - GroupH + 4, w - 24, GroupH - 4);
+                    Rectangle gr = new Rectangle(14, rc.Y - curGroupH + 3, w - 24, curGroupH - 3);
                     TextRenderer.DrawText(g, it.Group, fGroup, gr, ThemePalette.TextMuted,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
                 }
                 else if (lastGroup != null)
                 {
+                    int sepY = rc.Y - Math.Max(3, curCollapsedGroupGap / 2 + 1);
                     using (var gp = new Pen(ThemePalette.BorderSubtle, 1f))
-                        g.DrawLine(gp, 12, rc.Y - 6, w - 12, rc.Y - 6);
+                        g.DrawLine(gp, 12, sepY, w - 12, sepY);
                 }
                 lastGroup = it.Group;
             }
@@ -187,8 +246,10 @@ public class NavRail : Control
             {
                 using (var sb = new SolidBrush(ThemePalette.Selected))
                     Native.FillRoundedRect(g, sb, rc, 7);
+                int indH = Math.Max(6, rc.Height - 12);
+                int indY = rc.Y + (rc.Height - indH) / 2;
                 using (var ab = new SolidBrush(ThemePalette.Accent))
-                    Native.FillRoundedRect(g, ab, new Rectangle(rc.X + 1, rc.Y + 7, 3, rc.Height - 14), 2);
+                    Native.FillRoundedRect(g, ab, new Rectangle(rc.X + 1, indY, 3, indH), 2);
             }
             else if (hov)
             {
@@ -1002,6 +1063,151 @@ public class StatusPillBar : Control
         if (disposing)
         {
             if (fPill != null) { fPill.Dispose(); fPill = null; }
+            if (tip != null) { tip.Dispose(); tip = null; }
+        }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>
+/// 准星方案可视化卡片条（最多 6 套，3 列 × 2 行网格，左画迷你准星缩略图，右显示名称与修改状态）。
+/// </summary>
+public class CrosshairPresetStrip : Control
+{
+    public List<CrosshairPreset> Presets = new List<CrosshairPreset>();
+    public int ActiveIndex = -1;
+    public bool IsActiveModified = false;
+
+    public event Action<int> PresetClicked;
+    public event Action<int, Point> PresetContextRequested;
+
+    Font fTitle, fTitleBold;
+    ToolTip tip;
+    int hoverIdx = -1;
+    string lastTip = "";
+
+    const int MaxCards = 6;
+    const int Cols = 3;
+    const int CardH = 34;
+    const int GapX = 6;
+    const int GapY = 6;
+
+    public CrosshairPresetStrip()
+    {
+        SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        fTitle = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
+        fTitleBold = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+        tip = new ToolTip();
+        tip.InitialDelay = 350;
+    }
+
+    public Rectangle GetCardRect(int idx)
+    {
+        if (idx < 0 || idx >= MaxCards) return Rectangle.Empty;
+        int w = Math.Max(120, ClientSize.Width);
+        int cardW = Math.Max(48, (w - GapX * (Cols - 1)) / Cols);
+        int row = idx / Cols;
+        int col = idx % Cols;
+        int x = col * (cardW + GapX);
+        if (col == Cols - 1) cardW = Math.Max(cardW, w - x);
+        int y = row * (CardH + GapY);
+        return new Rectangle(x, y, cardW, CardH);
+    }
+
+    public int HitTest(Point pt)
+    {
+        int count = Presets != null ? Math.Min(MaxCards, Presets.Count) : 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (GetCardRect(i).Contains(pt)) return i;
+        }
+        return -1;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Parent != null ? Parent.BackColor : ThemePalette.SurfaceAlt);
+        if (Presets == null || Presets.Count == 0) return;
+
+        int count = Math.Min(MaxCards, Presets.Count);
+        for (int i = 0; i < count; i++)
+        {
+            CrosshairPreset p = Presets[i];
+            Rectangle rc = GetCardRect(i);
+            bool active = (i == ActiveIndex);
+            bool hover = (i == hoverIdx);
+
+            Color bg = active ? ThemePalette.AccentSoft : (hover ? ThemePalette.Hover : ThemePalette.Surface);
+            Color edge = active ? ThemePalette.Accent : (hover ? ThemePalette.BorderFocus : ThemePalette.BorderSubtle);
+            using (var br = new SolidBrush(bg))
+                Native.FillRoundedRect(g, br, rc, 6);
+            using (var pen = new Pen(edge, active ? 1.5f : 1f))
+                Native.DrawRoundedRect(g, pen, new Rectangle(rc.X, rc.Y, rc.Width - 1, rc.Height - 1), 6);
+
+            var iconBox = new Rectangle(rc.X + 6, rc.Y + (rc.Height - 22) / 2, 22, 22);
+            CrosshairPreset.DrawMiniIcon(g, p, iconBox);
+
+            bool showModDot = active && IsActiveModified;
+            int rightReserve = showModDot ? 14 : 6;
+            var textRect = new Rectangle(iconBox.Right + 6, rc.Y, Math.Max(10, rc.Right - iconBox.Right - 6 - rightReserve), rc.Height);
+            TextRenderer.DrawText(g, p.Name ?? "", active ? fTitleBold : fTitle, textRect,
+                active ? ThemePalette.AccentSoftFg : ThemePalette.TextPrimary,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+
+            if (showModDot)
+            {
+                SmoothingMode oldSm = g.SmoothingMode;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var dotBr = new SolidBrush(ThemePalette.Warning))
+                    g.FillEllipse(dotBr, rc.Right - 11, rc.Y + (rc.Height - 6) / 2, 6, 6);
+                g.SmoothingMode = oldSm;
+            }
+        }
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        int next = HitTest(e.Location);
+        if (next != hoverIdx)
+        {
+            hoverIdx = next;
+            Cursor = (next >= 0) ? Cursors.Hand : Cursors.Default;
+            string want = "";
+            if (next >= 0 && Presets != null && next < Presets.Count)
+                want = Presets[next].DescribeSummary() + "\n左键切换 · 右键管理方案";
+            if (want != lastTip) { lastTip = want; tip.SetToolTip(this, want); }
+            Invalidate();
+        }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        if (hoverIdx != -1) { hoverIdx = -1; Cursor = Cursors.Default; Invalidate(); }
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        int idx = HitTest(e.Location);
+        if (idx >= 0)
+        {
+            if (e.Button == MouseButtons.Left && PresetClicked != null)
+                PresetClicked(idx);
+            else if (e.Button == MouseButtons.Right && PresetContextRequested != null)
+                PresetContextRequested(idx, PointToScreen(e.Location));
+        }
+        base.OnMouseUp(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            if (fTitle != null) { fTitle.Dispose(); fTitle = null; }
+            if (fTitleBold != null) { fTitleBold.Dispose(); fTitleBold = null; }
             if (tip != null) { tip.Dispose(); tip = null; }
         }
         base.Dispose(disposing);

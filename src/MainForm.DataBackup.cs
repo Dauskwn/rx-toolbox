@@ -180,7 +180,8 @@ public partial class MainForm
             {
                 string line = lines[i];
                 int eq = line.IndexOf('=');
-                if (eq > 0 && line.Substring(0, eq).Trim() == "HubKey")
+                string sk = eq > 0 ? line.Substring(0, eq).Trim() : "";
+                if (sk == "HubKey" || sk == "HubKeyEnc")
                 {
                     changed = true;
                     continue;
@@ -624,7 +625,7 @@ public partial class MainForm
             }
             UpdatePendingDataStateUi();
             if (toast != null)
-                toast.ShowText("本地有待查看的新版指令表（phrases.new.json），可在「关于 → 数据对比与备份管理」中决定是否替换");
+                toast.ShowText("本地有待查看的新版指令表（phrases.new.json），可在「设置 → 数据对比与备份管理」中决定是否替换");
         }
         catch { }
     }
@@ -885,14 +886,7 @@ public partial class MainForm
             {
                 crossImgToLoad = "";
                 LoadSettings();
-                if (chkAutoUpdate != null) chkAutoUpdate.Checked = autoUpdateOn;
-                if (cmbDataUpdateMode != null) cmbDataUpdateMode.SelectedIndex = Math.Max(0, Math.Min(2, dataUpdateMode));
-                if (chkDevTools != null)
-                {
-                    devToolsLoading = true;
-                    chkDevTools.Checked = devToolsOn;
-                    devToolsLoading = false;
-                }
+                UpdateTrayIconVisibility();
                 ApplyDevToolsTab(devToolsOn);
                 ApplyTheme();
                 FillSrvList();
@@ -905,6 +899,8 @@ public partial class MainForm
                     LoadCrosshairImage(Path.Combine(dataRootDir, "crosshair.png"), true);
                 else if (overlay != null && !string.IsNullOrEmpty(overlay.CustomImagePath))
                     ClearCrosshairImage();
+                SyncCrossPresetUiState();
+                SyncSettingsPageUi();
             }
             else if (crossImgChanged && File.Exists(Path.Combine(dataRootDir, "crosshair.png")))
             {
@@ -912,6 +908,7 @@ public partial class MainForm
             }
 
             UpdatePendingDataStateUi();
+            SyncSettingsPageUi();
             RefreshUi(true);
         }
         catch (Exception ex)

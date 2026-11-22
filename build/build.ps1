@@ -23,7 +23,7 @@ foreach ($c in @(
 }
 if (-not $csc) { throw "未找到 csc.exe" }
 
-$adminOnlyFiles = @("MainForm.Data.cs", "MainForm.DataBackup.cs", "MainForm.DevHub.cs", "CommandPalette.cs", "MainForm.Navigation.cs")
+$adminOnlyFiles = @("MainForm.Data.cs", "MainForm.DataBackup.cs", "MainForm.DevHub.cs", "CommandPalette.cs", "MainForm.Navigation.cs", "OnlinePlayerPicker.cs", "MainForm.Settings.cs")
 $srcFiles = Get-ChildItem (Join-Path $root "src") -Filter *.cs | Where-Object {
     $isAdmin -or ($adminOnlyFiles -notcontains $_.Name)
 } | Sort-Object Name | ForEach-Object { $_.FullName }
@@ -42,6 +42,7 @@ $args0 = @(
     "/nologo", "/target:winexe", "/platform:x64", "/optimize+", "/utf8output",
     "/r:System.dll", "/r:System.Core.dll", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll"
 )
+if ($isAdmin) { $args0 += "/r:System.Security.dll" }
 if (Test-Path $icon) { $args0 += "/win32icon:$icon" }
 
 # 使用指南里的两张示意图（仅管理版嵌进 exe；公开玩家版不含服务器列表与 IP 截图）

@@ -18,7 +18,7 @@ using Windows.Storage.Streams;
 
 public partial class MainForm : Form
 {
-    public const string APP_VERSION = "V1.9.0";
+    public const string APP_VERSION = "V1.9.1";
 
     Overlay overlay;
     Toast toast;
@@ -28,7 +28,25 @@ public partial class MainForm : Form
     ComboBox cmbStyle;
     ComboBox cmbColor;
     NumericUpDown nThick, nLen, nGap, nDot, nCrossOutline, nCrossOpacity;
+    NumericUpDown nCrossOffX, nCrossOffY;
+    Label lblCrossOffBadge;
     CrosshairPreview crossPreview;
+    Panel pCrossPanel, cardCrossPreset, cardCrossOffset;
+    CrosshairPresetStrip crossPresetStrip;
+    Button btnCrossPresetSave, btnCrossPresetAdd;
+    List<CrosshairPreset> crossPresets = CrosshairPreset.CreateDefaultPresets();
+    int activeCrossPresetIdx = 0;
+    bool closeToTrayOn = false;
+    bool trayHintShown = false;
+    bool allowRealExit = false;
+    CheckBox chkCloseToTray;
+    NotifyIcon trayIcon;
+    ContextMenuStrip trayMenu;
+    ToolStripMenuItem trayMiCross, trayMiTimer, trayMiHotkeys, trayMiPresetRoot;
+#if ADMIN_EDITION
+    ToolStripMenuItem trayMiSearch;
+#endif
+    string lastTrayText = "";
     RxSegmentedControl segJoinMode;
     Button btnAuto;
     TabControl tabs;
@@ -111,11 +129,11 @@ public partial class MainForm : Form
     public const string UPDATE_URL_DEFAULT = "https://rx-tools.pages.dev/version.json";
     public const string APP_EDITION_SUFFIX = "";
 #endif
-    public const string APP_VERSION_NUM = "1.9.0";
-    public const string APP_BUILD_DATE = "2026-11-19";
+    public const string APP_VERSION_NUM = "1.9.1";
+    public const string APP_BUILD_DATE = "2026-11-23";
     string updateUrl = UPDATE_URL_DEFAULT;
 #if ADMIN_EDITION
-    Control aboutPage, customPage, devPage;
+    Control aboutPage, customPage, devPage, settingsPage;
 #else
     TabPage aboutPage, spacerPage, customPage;
 #endif
@@ -133,6 +151,12 @@ public partial class MainForm : Form
     string hubUrl = "https://rx-toolbox.pages.dev/api";
     string hubKey = "";
     string updLatestDataUrl = "", updLatestDataSha = "";   // 数据文件（phrases.json）随 exe 一起更新
+    string mySteamName = "";
+    string onlinePickerAddr = "";
+    bool onlinePickerHideBots = true;
+    int onlinePickerSortMode = 0;
+    Button btnOnlinePlayers;
+    readonly Dictionary<string, OnlinePlayerCache> onlinePlayerCache = new Dictionary<string, OnlinePlayerCache>(StringComparer.OrdinalIgnoreCase);
 #else
     TabPage joinPage, crossPage, timerPage;
     Label lblPlayerBarTip;
@@ -404,6 +428,11 @@ public partial class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
+        if (m.Msg == Native.WM_RX_WAKE)
+        {
+            RestoreFromTray();
+            return;
+        }
         if (m.Msg == 0x0312)   // WM_HOTKEY
         {
             int id = m.WParam.ToInt32();
@@ -573,6 +602,9 @@ public partial class MainForm : Form
 #endif
 
         LoadSettings();
+        InitTrayIcon();
+        UpdateTrayIconVisibility();
+        SyncCrossPresetUiState();
 #if ADMIN_EDITION
         if (navRail != null) navRail.SetCollapsed(navRailCollapsed);
         if (chkDevTools != null)
@@ -848,7 +880,8 @@ public partial class MainForm : Form
         Color darkDivider = Color.FromArgb(48, 54, 61);
 
         if (root is CrosshairPreview || root is WrapList || root is NavRail || root is RxSegmentedControl
-            || root is TimelineCanvas || root is StatusPillBar || root is CustomPhraseCard)
+            || root is TimelineCanvas || root is StatusPillBar || root is CustomPhraseCard
+            || root is CrosshairPresetStrip)
         {
             root.Invalidate();
             return;
@@ -878,6 +911,12 @@ public partial class MainForm : Form
         {
             root.BackColor = IsDark ? Color.FromArgb(46, 33, 18) : Color.FromArgb(255, 246, 229);
             root.ForeColor = IsDark ? Color.FromArgb(227, 179, 65) : Color.FromArgb(166, 56, 12);
+        }
+        else if (root is Panel && Convert.ToString(root.Tag) == "rx-surface-card")
+        {
+            root.BackColor = ThemePalette.SurfaceAlt;
+            root.ForeColor = ThemePalette.TextPrimary;
+            root.Invalidate();
         }
         else if (root is Panel && !(root is FlowLayoutPanel) && root.Height <= 2 && root.Controls.Count == 0)
         {
@@ -1127,6 +1166,10 @@ public partial class MainForm : Form
             lvTimerChain.RefreshTheme();
         }
         RenderChangelog();
+        SyncCrossPresetUiState();
+#if ADMIN_EDITION
+        SyncSettingsPageUi();
+#endif
         RefreshUi(true);
         Invalidate(true);
     }
@@ -1198,6 +1241,7 @@ public partial class MainForm : Form
         if (lblCrossImg != null)
             lblCrossImg.Text = "自定义准星：" + System.IO.Path.GetFileName(path)
                 + "（原图 " + bmp.Width + "×" + bmp.Height + "，可通过“臂长+间隙”调整大小）";
+        SyncCrossPresetUiState();
         SaveSettings();
         RefreshUi(true);
         Native.Log("crosshair image: " + path);
@@ -1262,6 +1306,7 @@ public partial class MainForm : Form
         overlay.Invalidate();
         if (crossPreview != null) crossPreview.Invalidate();
         if (lblCrossImg != null) lblCrossImg.Text = "当前用内置矢量样式（可导入 PNG 做自定义准星）";
+        SyncCrossPresetUiState();
         SaveSettings();
         RefreshUi(true);
         toast.ShowText("已清除自定义准星图片");
@@ -1352,6 +1397,7 @@ public partial class MainForm : Form
                     : (HotkeysOk() ? "开" : "冲突"), sent);
         }
 #endif
+        UpdateTrayTooltip();
     }
 
     void OnTick(object sender, EventArgs e)
@@ -1593,6 +1639,7 @@ public partial class MainForm : Form
             if (tabs != null) { tabs.PerformLayout(); LayoutAboutTab(); }
             LayoutToolBar();
             if (pJoinPanel != null) LayoutJoin();
+            LayoutCrossPanel();
             if (pTimerPanel != null) LayoutTimer();
         }
         catch { }
@@ -1678,6 +1725,154 @@ public partial class MainForm : Form
         Native.Log("shown");
     }
 
+    void InitTrayIcon()
+    {
+        if (trayIcon != null) return;
+        trayMenu = new ContextMenuStrip(uiComponents);
+        var miShow = new ToolStripMenuItem("显示主窗口", null, delegate { RestoreFromTray(); });
+        miShow.Font = TrackFont("Microsoft YaHei UI", 9f, FontStyle.Bold);
+        trayMenu.Items.Add(miShow);
+        trayMenu.Items.Add(new ToolStripSeparator());
+
+        trayMiCross = new ToolStripMenuItem("屏幕准星 (" + KeyName(4) + ")", null, delegate { ToggleCross(); });
+        trayMenu.Items.Add(trayMiCross);
+
+        trayMiPresetRoot = new ToolStripMenuItem("切换准星方案");
+        trayMenu.Items.Add(trayMiPresetRoot);
+
+        trayMiTimer = new ToolStripMenuItem("倒计时悬浮窗 (" + KeyName(7) + ")", null, delegate { ToggleCountdownOverlay(); });
+        trayMenu.Items.Add(trayMiTimer);
+
+#if ADMIN_EDITION
+        trayMiSearch = new ToolStripMenuItem("呼出全局搜索 (" + KeyName(9) + ")", null, delegate { OpenCommandPalette(true); });
+        trayMenu.Items.Add(trayMiSearch);
+#endif
+        trayMiHotkeys = new ToolStripMenuItem("关闭全局热键", null, delegate { ToggleHotkeys(); });
+        trayMenu.Items.Add(trayMiHotkeys);
+
+        trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add("彻底退出", null, delegate { ExitAppReal(); });
+
+        trayMenu.Opening += delegate
+        {
+            if (trayMiCross != null)
+            {
+                trayMiCross.Text = "屏幕准星 (" + KeyName(4) + ")";
+                trayMiCross.Checked = (overlay != null && overlay.Visible);
+            }
+            if (trayMiTimer != null)
+            {
+                trayMiTimer.Text = "倒计时悬浮窗 (" + KeyName(7) + ")";
+                trayMiTimer.Checked = (timerOverlay != null && timerOverlay.Visible);
+            }
+#if ADMIN_EDITION
+            if (trayMiSearch != null)
+            {
+                trayMiSearch.Text = "呼出全局搜索 (" + KeyName(9) + ")";
+            }
+#endif
+            if (trayMiHotkeys != null)
+            {
+                trayMiHotkeys.Text = hotkeysOff
+                    ? ("恢复全局热键 (" + ToggleKeyName() + ")")
+                    : ("关闭全局热键 (" + ToggleKeyName() + ")");
+            }
+            if (trayMiPresetRoot != null)
+            {
+                trayMiPresetRoot.DropDownItems.Clear();
+                if (crossPresets != null)
+                {
+                    for (int i = 0; i < crossPresets.Count; i++)
+                    {
+                        int pidx = i;
+                        var sub = new ToolStripMenuItem(crossPresets[i].Name, null, delegate { ApplyCrossPreset(pidx, false); });
+                        sub.Checked = (pidx == activeCrossPresetIdx && crossPresets[i].MatchesOverlay(overlay));
+                        trayMiPresetRoot.DropDownItems.Add(sub);
+                    }
+                }
+            }
+        };
+
+        trayIcon = new NotifyIcon(uiComponents);
+        trayIcon.Icon = Icon != null ? Icon : SystemIcons.Application;
+        trayIcon.ContextMenuStrip = trayMenu;
+        trayIcon.MouseClick += delegate(object snd, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) RestoreFromTray();
+        };
+        UpdateTrayTooltip();
+    }
+
+    void UpdateTrayIconVisibility()
+    {
+        if (trayIcon == null) return;
+        bool want = closeToTrayOn || !Visible;
+        if (trayIcon.Visible != want)
+        {
+            try { trayIcon.Visible = want; } catch { }
+        }
+    }
+
+    void UpdateTrayTooltip()
+    {
+        if (trayIcon == null) return;
+        string txt = "RX 工具箱 " + APP_VERSION;
+        if (overlay != null && overlay.Visible) txt += " · 准星开";
+        if (timerOverlay != null && timerOverlay.Visible) txt += " · 倒计时开";
+        if (autoOn || typingOn) txt += " · 挤服中";
+        if (txt.Length > 63) txt = txt.Substring(0, 62) + "…";
+        if (txt != lastTrayText)
+        {
+            lastTrayText = txt;
+            try { trayIcon.Text = txt; } catch { }
+        }
+    }
+
+    void HideToTray()
+    {
+        if (isClosing || IsDisposed) return;
+        InitTrayIcon();
+        Hide();
+        UpdateTrayIconVisibility();
+        UpdateTrayTooltip();
+        if (!trayHintShown)
+        {
+            trayHintShown = true;
+            if (toast != null)
+                toast.ShowText("已缩进系统托盘：单击右下角图标恢复，右键可彻底退出");
+        }
+    }
+
+    void RestoreFromTray()
+    {
+        if (isClosing || IsDisposed) return;
+        if (!Visible) Show();
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Native.ShowWindow(Handle, 5);
+        Activate();
+        Native.SetForegroundWindow(Handle);
+        Native.SetDarkTitleBar(Handle, IsDark);
+        UpdateTrayIconVisibility();
+        LayoutCrossPanel();
+    }
+
+    void ExitAppReal()
+    {
+        allowRealExit = true;
+        Close();
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason == CloseReason.UserClosing && closeToTrayOn && !allowRealExit && !isClosing)
+        {
+            e.Cancel = true;
+            HideToTray();
+            return;
+        }
+        base.OnFormClosing(e);
+    }
+
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         isClosing = true;
@@ -1693,6 +1888,17 @@ public partial class MainForm : Form
         }
         try { if (hkRegistered[HK_TOGGLE_ID]) Native.UnregisterHotKey(Handle, HK_TOGGLE_ID); } catch { }
         SaveSettings();
+        try
+        {
+            if (trayIcon != null)
+            {
+                trayIcon.Visible = false;
+                trayIcon.Dispose();
+                trayIcon = null;
+            }
+        }
+        catch { }
+        try { if (trayMenu != null) { trayMenu.Dispose(); trayMenu = null; } } catch { }
         try { if (tick != null) { tick.Stop(); tick.Dispose(); tick = null; } } catch (Exception ex) { Native.Log("tick dispose: " + ex.Message); }
         try { if (uiComponents != null) { uiComponents.Dispose(); uiComponents = null; } } catch { }
         try { if (toast != null) { toast.Close(); toast.Dispose(); toast = null; } } catch { }

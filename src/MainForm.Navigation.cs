@@ -246,6 +246,7 @@ public partial class MainForm
             navRailCollapsed = navRail.Collapsed;
             SaveSettings();
             LayoutHeaderBar();
+            SyncSettingsPageUi();
         };
 
         // 右侧主工作区
@@ -336,7 +337,7 @@ public partial class MainForm
         btnTargetClear.SetBounds(462, 12, 24, 25);
         btnTargetClear.Click += delegate { SetGlobalTarget("", false); txtGlobalTarget.Focus(); };
         var tipClr = new ToolTip(uiComponents);
-        tipClr.SetToolTip(btnTargetClear, "清空目标，恢复对 ^（自己）生效");
+        tipClr.SetToolTip(btnTargetClear, "清空目标，恢复为自己（^）");
         headerBar.Controls.Add(btnTargetClear);
 
         btnTargetHistory = new Button();
@@ -347,8 +348,22 @@ public partial class MainForm
         btnTargetHistory.SetBounds(488, 12, 26, 25);
         btnTargetHistory.Click += delegate { ShowTargetHistoryMenu(); };
         var tipHist = new ToolTip(uiComponents);
-        tipHist.SetToolTip(btnTargetHistory, "选择最近使用过的目标玩家名（跨 6 张表实时同步）");
+        tipHist.SetToolTip(btnTargetHistory, "选择最近用过的目标玩家");
         headerBar.Controls.Add(btnTargetHistory);
+
+        btnOnlinePlayers = new Button();
+        btnOnlinePlayers.Text = "在线选人";
+        btnOnlinePlayers.Font = TrackFont("Microsoft YaHei UI", 8.3f, FontStyle.Bold);
+        btnOnlinePlayers.FlatStyle = FlatStyle.Flat;
+        btnOnlinePlayers.BackColor = Color.FromArgb(228, 242, 255);
+        btnOnlinePlayers.ForeColor = Color.FromArgb(24, 64, 128);
+        btnOnlinePlayers.FlatAppearance.BorderColor = Color.FromArgb(140, 185, 240);
+        btnOnlinePlayers.Cursor = Cursors.Hand;
+        btnOnlinePlayers.SetBounds(518, 12, 68, 25);
+        btnOnlinePlayers.Click += delegate { OpenOnlinePlayerPicker(); };
+        var tipOnline = new ToolTip(uiComponents);
+        tipOnline.SetToolTip(btnOnlinePlayers, "查看服务器在线玩家，点击设为目标或复制昵称");
+        headerBar.Controls.Add(btnOnlinePlayers);
 
         // 右侧全局搜索触发胶囊（动态联动全局热键）
         globalSearchPill = new SearchTriggerPill();
@@ -408,6 +423,9 @@ public partial class MainForm
         NavItem devNav = navRail.FindItem("dev");
         if (devNav != null) devNav.Visible = devToolsOn;
 
+        settingsPage = BuildSettingsPage();
+        RegisterNavPage("settings", "设置", "BOTTOM", NavIconKind.Settings, 0, settingsPage);
+
         aboutPage = BuildAboutPage();
         RegisterNavPage("about", "关于与更新", "BOTTOM", NavIconKind.Info, 0, aboutPage);
 
@@ -430,7 +448,7 @@ public partial class MainForm
             if (tipGlobalSearch != null && btnGlobalSearch != null && !btnGlobalSearch.IsDisposed)
             {
                 tipGlobalSearch.SetToolTip(btnGlobalSearch,
-                    "全局命令面板：任意窗口/工具箱内按 " + hk + " 呼出或收起（可在「热键」中修改）");
+                    "按 " + hk + " 随时呼出或收起快捷搜索（可在设置中改键）");
             }
         }
         catch { }
@@ -479,7 +497,7 @@ public partial class MainForm
             TextRenderer.DrawText(g, sc, fKbd, kbd, ThemePalette.TextMuted,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
 
-            TextRenderer.DrawText(g, "呼出全局搜索弹窗", fHint,
+            TextRenderer.DrawText(g, "快捷搜索指令", fHint,
                 new Rectangle(28, 0, Math.Max(40, kbd.Left - 32), h),
                 hovered ? ThemePalette.TextPrimary : ThemePalette.TextMuted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
@@ -585,11 +603,11 @@ public partial class MainForm
         if (lblToolPageTip != null)
         {
             if (targetPage == joinNavPage)
-                lblToolPageTip.Text = "A2S 状态探测（含地图/延迟/容量条）与自动挤服 · OCR 识别进服自动停";
+                lblToolPageTip.Text = "查看服务器人数、地图与延迟 · 支持自动挤服与进服自动停";
             else if (targetPage == crossNavPage)
-                lblToolPageTip.Text = "32-bit 抗锯齿透明准星 · 支持黑色外描边、不透明度与无损 PNG Alpha";
+                lblToolPageTip.Text = "自定义屏幕准星样式、颜色、偏移与透明图片";
             else if (targetPage == timerNavPage)
-                lblToolPageTip.Text = "32-bit 高清描边倒计时 · 可选胶囊背板、可视化时间轴与平滑脉冲";
+                lblToolPageTip.Text = "游戏内悬浮倒计时 · 支持多套方案与拖动时间轴";
         }
         LayoutToolBar();
     }
@@ -608,8 +626,9 @@ public partial class MainForm
 
         if (key == "fav") RefreshFavoritesPage();
         else if (key == "join") { MountSharedToolStrip(joinNavPage); LayoutJoin(); }
-        else if (key == "cross") { MountSharedToolStrip(crossNavPage); if (crossPreview != null) crossPreview.Invalidate(); }
+        else if (key == "cross") { MountSharedToolStrip(crossNavPage); LayoutCrossPanel(); if (crossPreview != null) crossPreview.Invalidate(); }
         else if (key == "timer") { MountSharedToolStrip(timerNavPage); LayoutTimer(); }
+        else if (key == "settings") { SyncSettingsPageUi(); LayoutSettingsPage(); }
 
         UpdateHeaderBar();
     }
@@ -626,22 +645,25 @@ public partial class MainForm
         if (pref != null) pref.Visible = showTarget;
         if (txtGlobalTarget != null) txtGlobalTarget.Visible = showTarget;
         if (btnTargetHistory != null) btnTargetHistory.Visible = showTarget;
+        if (btnOnlinePlayers != null) btnOnlinePlayers.Visible = showTarget;
         if (btnTargetClear != null) btnTargetClear.Visible = showTarget && !string.IsNullOrEmpty(globalTargetName);
 
         if (activeNavKey == "fav")
-            lblHeaderSub.Text = "星标收藏 " + pinnedKeys.Count + " 项 · 最近复制 " + recentPinKeys.Count + " 项";
+            lblHeaderSub.Text = "已收藏 " + pinnedKeys.Count + " 项 · 最近用过 " + recentPinKeys.Count + " 项";
         else if (activeNavKey.StartsWith("data:", StringComparison.Ordinal))
-            lblHeaderSub.Text = (it != null ? ("共 " + it.BadgeCount + " 条指令 · 单击即复制，左星标收藏") : "单击即复制");
+            lblHeaderSub.Text = (it != null ? ("共 " + it.BadgeCount + " 条 · 点一下即复制，点左侧 ★ 收藏") : "点一下即复制");
         else if (activeNavKey == "custom")
-            lblHeaderSub.Text = "共 " + cTitles.Length + " 张卡片 · 支持 {target} 动态目标与多行串联";
+            lblHeaderSub.Text = "共 " + cTitles.Length + " 张卡片 · 支持 {target} 替换目标玩家";
         else if (activeNavKey == "join")
-            lblHeaderSub.Text = "已收藏 " + favList.Length + " 个服务器 · 支持按空位/延迟排序";
+            lblHeaderSub.Text = "已收藏 " + favList.Length + " 个服务器 · 可按人数或延迟排序";
         else if (activeNavKey == "cross")
             lblHeaderSub.Text = "当前样式：" + Overlay.Styles[overlay.StyleIndex] + " · " + Overlay.ColorNames[overlay.ColorIndex];
         else if (activeNavKey == "timer")
-            lblHeaderSub.Text = timerRunning ? (timerPaused ? "倒计时已暂停" : "倒计时运行中") : "预设方案与可视化时间链";
+            lblHeaderSub.Text = timerRunning ? (timerPaused ? "倒计时已暂停" : "倒计时运行中") : "常用倒计时方案与时间轴";
         else if (activeNavKey == "dev")
-            lblHeaderSub.Text = "数据快照导入导出与在线版本库协同";
+            lblHeaderSub.Text = "导出导入指令表，与在线版本库同步";
+        else if (activeNavKey == "settings")
+            lblHeaderSub.Text = "外观、快捷搜索、在线选人、热键与备份";
         else if (activeNavKey == "about")
             lblHeaderSub.Text = APP_VERSION + " · 构建 " + APP_BUILD_DATE + " · 单文件绿色版";
         LayoutHeaderBar();
@@ -653,24 +675,147 @@ public partial class MainForm
         int w = headerBar.ClientSize.Width;
         if (w < 300) return;
 
-        int searchW = Math.Max(180, Math.Min(250, w - 530));
+        int searchW = Math.Max(176, Math.Min(240, w - 550));
         if (btnGlobalSearch != null)
             btnGlobalSearch.SetBounds(w - searchW - 14, 10, searchW, 30);
 
         int rightEdge = (btnGlobalSearch != null) ? (btnGlobalSearch.Left - 14) : (w - 14);
-        if (btnTargetHistory != null) btnTargetHistory.SetBounds(rightEdge - 26, 12, 26, 25);
+        int curRight = rightEdge;
+        if (btnOnlinePlayers != null)
+        {
+            btnOnlinePlayers.SetBounds(curRight - 68, 12, 68, 25);
+            curRight = btnOnlinePlayers.Left - 4;
+        }
+        if (btnTargetHistory != null)
+        {
+            btnTargetHistory.SetBounds(curRight - 26, 12, 26, 25);
+            curRight = btnTargetHistory.Left - 2;
+        }
         bool hasClr = !string.IsNullOrEmpty(globalTargetName);
         int clrSpace = hasClr ? 26 : 0;
-        if (btnTargetClear != null) btnTargetClear.SetBounds(rightEdge - 26 - 26, 12, 24, 25);
-        int boxW = Math.Max(110, Math.Min(164, rightEdge - 26 - clrSpace - 286));
-        if (txtGlobalTarget != null) txtGlobalTarget.SetBounds(rightEdge - 26 - clrSpace - boxW - 2, 12, boxW, 25);
+        if (btnTargetClear != null) btnTargetClear.SetBounds(curRight - 24, 12, 24, 25);
+        curRight -= clrSpace;
+
+        bool compactTgt = (w < 780);
+        int prefW = compactTgt ? 48 : 82;
+        int boxW = Math.Max(104, Math.Min(160, curRight - prefW - 148));
+        if (txtGlobalTarget != null) txtGlobalTarget.SetBounds(curRight - boxW, 12, boxW, 25);
         Control pref = headerBar.Controls["lblTgtPrefix"];
-        if (pref != null && txtGlobalTarget != null) pref.SetBounds(txtGlobalTarget.Left - 84, 13, 82, 24);
+        if (pref != null && txtGlobalTarget != null)
+        {
+            string wantPref = compactTgt ? "目标：" : "目标玩家：";
+            if (pref.Text != wantPref) pref.Text = wantPref;
+            pref.SetBounds(txtGlobalTarget.Left - prefW - 2, 13, prefW, 24);
+        }
 
         bool showTarget = (activeNavKey == "fav" || activeNavKey == "custom" || activeNavKey.StartsWith("data:", StringComparison.Ordinal));
-        int titleMax = (showTarget && pref != null) ? Math.Max(120, pref.Left - 24) : Math.Max(160, rightEdge - 24);
+        int titleMax = (showTarget && pref != null) ? Math.Max(110, pref.Left - 12) : Math.Max(160, rightEdge - 24);
         if (lblHeaderTitle != null) lblHeaderTitle.Width = titleMax;
         if (lblHeaderSub != null) lblHeaderSub.Width = titleMax;
+    }
+
+    List<OnlineServerEntry> BuildOnlineServerEntries()
+    {
+        var srvEntries = new List<OnlineServerEntry>();
+        if (favList == null || favList.Length == 0) return srvEntries;
+        for (int i = 0; i < favList.Length; i++)
+        {
+            string addr = AddrOf(favList[i]);
+            if (string.IsNullOrEmpty(addr)) continue;
+            string[] parts = (favList[i] ?? "").Split('|');
+            string alias = (parts.Length > 1) ? parts[1].Trim() : "";
+            string real = (i < favName.Length && !string.IsNullOrEmpty(favName[i])) ? favName[i] : "";
+            string title = !string.IsNullOrEmpty(alias)
+                ? (string.IsNullOrEmpty(real) ? alias : (alias + " · " + Shorten(real)))
+                : (string.IsNullOrEmpty(real) ? addr : Shorten(real));
+            int pc = (i < favCount.Length) ? favCount[i] : -2;
+            int mc = (i < favMax.Length) ? favMax[i] : 0;
+            string cntTag = (pc >= 0 && mc > 0) ? (" (" + pc + "/" + mc + ")") : "";
+            srvEntries.Add(new OnlineServerEntry { Addr = addr, Label = title + cntTag });
+        }
+        return srvEntries;
+    }
+
+    string ResolveInitialOnlineServerAddr(List<OnlineServerEntry> srvEntries)
+    {
+        if (srvEntries == null || srvEntries.Count == 0) return "";
+        string initAddr = onlinePickerAddr;
+        if (!string.IsNullOrEmpty(initAddr))
+        {
+            bool found = false;
+            for (int i = 0; i < srvEntries.Count; i++)
+            {
+                if (string.Equals(srvEntries[i].Addr, initAddr, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) initAddr = "";
+        }
+        if (string.IsNullOrEmpty(initAddr))
+            initAddr = SelectedAddr();
+        if (string.IsNullOrEmpty(initAddr))
+            initAddr = srvEntries[0].Addr;
+        return initAddr;
+    }
+
+    void OpenOnlinePlayerPicker()
+    {
+        if (favList == null || favList.Length == 0)
+        {
+            toast.ShowText("请先在左侧「挤服助手」添加服务器");
+            return;
+        }
+        List<OnlineServerEntry> srvEntries = BuildOnlineServerEntries();
+        if (srvEntries.Count == 0)
+        {
+            toast.ShowText("暂无可用的服务器地址");
+            return;
+        }
+        string initAddr = ResolveInitialOnlineServerAddr(srvEntries);
+
+        using (var dlg = new OnlinePlayerPickerForm(
+            srvEntries,
+            initAddr,
+            mySteamName,
+            onlinePickerHideBots,
+            onlinePickerSortMode,
+            onlinePlayerCache,
+            delegate(string pickedName)
+            {
+                SetGlobalTarget(pickedName, true);
+                toast.ShowText(string.IsNullOrEmpty(pickedName)
+                    ? "目标已重置为 ^（自己）"
+                    : ("全局目标已设为：" + pickedName));
+            },
+            delegate(string rawName)
+            {
+                CopyToClipboard("玩家昵称", rawName);
+            },
+            delegate(string rawName)
+            {
+                CopyToClipboard("玩家昵称(引号)", QuoteTargetName(rawName));
+            },
+            delegate(string nm, bool hideBots, int sortMode, string lastAddr)
+            {
+                bool dirty = (mySteamName != (nm ?? ""))
+                    || (onlinePickerHideBots != hideBots)
+                    || (onlinePickerSortMode != sortMode)
+                    || (onlinePickerAddr != (lastAddr ?? ""));
+                mySteamName = nm ?? "";
+                onlinePickerHideBots = hideBots;
+                onlinePickerSortMode = sortMode;
+                onlinePickerAddr = lastAddr ?? "";
+                if (dirty)
+                {
+                    SaveSettings();
+                    SyncSettingsPageUi();
+                }
+            }))
+        {
+            dlg.ShowDialog(this);
+        }
     }
 
     void UpdateNavBadges()
@@ -886,7 +1031,7 @@ public partial class MainForm
     {
         if (string.IsNullOrEmpty(body)) return "";
         string idTxt = (targetName ?? "").Trim();
-        string rep = idTxt.Length == 0 ? "^" : ((idTxt.IndexOf(' ') >= 0 && !(idTxt.StartsWith("\"") && idTxt.EndsWith("\""))) ? ("\"" + idTxt + "\"") : idTxt);
+        string rep = idTxt.Length == 0 ? "^" : QuoteTargetName(idTxt);
         string res = body.Replace("{target}", rep);
         if (idTxt.Length > 0 && res.IndexOf('^') >= 0) res = ApplyTargetName(res, idTxt);
         return res;
@@ -973,6 +1118,42 @@ public partial class MainForm
             IntPtr prevFg = fromGlobalHotkey ? Native.GetForegroundWindow() : IntPtr.Zero;
             palettePrevFg = prevFg;
             List<PaletteEntry> all = BuildAllPaletteEntries();
+            List<OnlineServerEntry> srvEntries = BuildOnlineServerEntries();
+            PalettePlayerContext playerCtx = null;
+            if (srvEntries.Count > 0)
+            {
+                playerCtx = new PalettePlayerContext
+                {
+                    Servers = srvEntries,
+                    InitialServerAddr = ResolveInitialOnlineServerAddr(srvEntries),
+                    MySteamName = mySteamName,
+                    HideBots = onlinePickerHideBots,
+                    SortMode = onlinePickerSortMode,
+                    Cache = onlinePlayerCache,
+                    OnTargetChanged = delegate(string pickedName)
+                    {
+                        SetGlobalTarget(pickedName, true);
+                    },
+                    OnCopyPlayerName = delegate(string rawName, bool quoted)
+                    {
+                        if (quoted) CopyToClipboard("玩家昵称(引号)", QuoteTargetName(rawName));
+                        else CopyToClipboard("玩家昵称", rawName);
+                        if (fromGlobalHotkey && prevFg != IntPtr.Zero && prevFg != Handle)
+                        {
+                            try { Native.SetForegroundWindow(prevFg); } catch { }
+                        }
+                    },
+                    OnServerChanged = delegate(string addr)
+                    {
+                        string next = addr ?? "";
+                        if (!string.Equals(onlinePickerAddr, next, StringComparison.OrdinalIgnoreCase))
+                        {
+                            onlinePickerAddr = next;
+                            SaveSettings();
+                        }
+                    }
+                };
+            }
             activePalette = new CommandPaletteForm(
                 all,
                 globalTargetName,
@@ -996,14 +1177,17 @@ public partial class MainForm
                 {
                     paletteOpacityPct = pct;
                     SaveSettings();
+                    SyncSettingsPageUi();
                 },
                 paletteDockMode,
                 delegate(int dm)
                 {
                     paletteDockMode = dm;
                     SaveSettings();
+                    SyncSettingsPageUi();
                 },
-                fromGlobalHotkey);
+                fromGlobalHotkey,
+                playerCtx);
             IntPtr palHandle = IntPtr.Zero;
             activePalette.HandleCreated += delegate { if (activePalette != null) palHandle = activePalette.Handle; };
             activePalette.FormClosed += delegate
